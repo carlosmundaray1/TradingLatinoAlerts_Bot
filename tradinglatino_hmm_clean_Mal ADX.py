@@ -50,6 +50,9 @@ if _MISSING_DEPS:
     print("=" * 60)
     print(f"\n  pip install {' '.join(_MISSING_DEPS)}\n")
     sys.exit(1)
+# Importar modulo de Markov Switching
+import tradinglatino_regime_switching as _MS
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
 
@@ -97,37 +100,8 @@ TAKE_PROFIT_PCT: Dict[str, float] = {
 TRAILING_STOP_PCT: Dict[str, float] = {
     "1h": 2.0,    # Optimo multi-objetivo: WR 73.5% | PF 3.48 | Sharpe 13.48
     "4h": 2.0,    # Optimo multi-objetivo: WR 73.2% | PF 5.55 | Sharpe 10.65
-    "1d": 1.0,    # Optimizado
-    "1wk": 1.0,   # Optimizado
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# PARAMETROS OPTIMIZADOS POR TIMEFRAME (Grid Search Multi-Objetivo)
-# ──────────────────────────────────────────────────────────────────────────────
-# Resultados en BTC-USD (Junio 2026):
-#   TF    Thresh  Cons  Trail%  TP%   BaseWR  CombWR  Senales
-#   ---   ------  ----  ------  ---   ------  ------  -------
-#   1H      70      2    2.0    0.5   76.1%   78.3%    456
-#   4H      75      3    0.5    1.2   76.3%   77.5%    173
-#   1D      65      2    1.0    2.0   78.5%   80.4%    316
-#   1WK     65      2    1.0    2.0   97.2%   97.2%     72
-TRAILING_STOP_PCT_OPT: Dict[str, float] = {
-    "1h": 2.0,    # Retroceso 2.0% desde maximo
-    "4h": 0.5,    # Retroceso 0.5% desde maximo (tight)
-    "1d": 1.0,
-    "1wk": 1.0,
-}
-SIGNAL_THRESHOLDS: Dict[str, int] = {
-    "1h": 70,
-    "4h": 75,
-    "1d": 65,
-    "1wk": 65,
-}
-MIN_CONSECUTIVE_BY_TF: Dict[str, int] = {
-    "1h": 2,
-    "4h": 3,
-    "1d": 2,
-    "1wk": 2,
+    "1d": 1.0,    # Optimo multi-objetivo: WR 79.5% | PF 16.26 | Sharpe 13.43
+    "1wk": 1.0,   # Optimo multi-objetivo: WR 96.8% | PF ∞ | Sharpe 7.95
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -159,7 +133,6 @@ W_RSI: int = 4            # RSI14 (reducido Opción C)
 W_VOLUME: int = 5         # Volumen relativo a su media (reducido Opción C)
 W_ATR_ROC: int = 2        # ATR Rate of Change (reducido Opción C)
 RSI_LENGTH: int = 14
-W_RSI_DIVERGENCE: int = 12  # Divergencias RSI-Precio (alcistas/bajistas, peso base)
 
 # -- MEJORA 1A: Peso del regimen HMM en el score compuesto --
 W_HMM_REGIME: int = 8
@@ -190,11 +163,6 @@ ATR_ROC_PERIODS: int = 3
 TP_ATR_MULT: float = 2.0      # Take profit en múltiplos de ATR
 TRAIL_ATR_MULT: float = 1.5   # Trailing stop en múltiplos de ATR
 DYNAMIC_THRESHOLD_MIN: int = 45  # Threshold mínimo cuando hay alta volatilidad (Versión D)
-
-# -- TELEGRAM ALERTS --
-TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "8942505010:AAGM9ziP38U3flYxPzR11gnVGwkuDz9o4KQ")       # Token (desde env var)
-TELEGRAM_CHAT_ID: str = os.environ.get("TELEGRAM_CHAT_ID", "536876820")        # Chat ID (desde env var)
-ENABLE_TELEGRAM: bool = os.environ.get("ENABLE_TELEGRAM", "true").lower() in ("true", "1", "yes")     # Activar (desde env var)
 
 
 
@@ -228,7 +196,7 @@ PERIOD_1W: str = "4y"
 # Si no ocurre, la premisa se invalida y el trade se cierra por expiración.
 MAX_BARS_BY_TF: Dict[str, int] = {
     "1h": 14,   # ~14 horas
-    "4h": 14,   # ~56 horas (optimizado por experiencia del usuario)
+    "4h": 12,   # ~48 horas
     "1d": 14,   # ~14 días
     "1wk": 12,  # ~3 meses
 }
@@ -346,46 +314,6 @@ def _rsi(series: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def _detect_rsi_divergence(df, lookback=30, swing_bars=3):
-    """Detecta divergencias RSI-Precio."""
-    df = df.copy()
-    df["rsi_div_bullish"] = 0.0
-    df["rsi_div_bearish"] = 0.0
-    if "rsi14" not in df.columns or len(df) < lookback:
-        return df
-    low = df["Low"].values
-    high = df["High"].values
-    rsi = df["rsi14"].values
-    n = len(df)
-    swing_low_idx = []
-    for i in range(swing_bars, n - swing_bars):
-        if low[i] == min(low[i-swing_bars:i+swing_bars+1]):
-            swing_low_idx.append(i)
-    swing_high_idx = []
-    for i in range(swing_bars, n - swing_bars):
-        if high[i] == max(high[i-swing_bars:i+swing_bars+1]):
-            swing_high_idx.append(i)
-    for i in range(1, len(swing_low_idx)):
-        p, q = swing_low_idx[i-1], swing_low_idx[i]
-        if q - p > lookback:
-            continue
-        if low[q] < low[p] and rsi[q] > rsi[p]:
-            strength = W_RSI_DIVERGENCE
-            if rsi[p] < 30:
-                strength += 4
-            df.loc[df.index[q]:, "rsi_div_bullish"] = strength
-    for i in range(1, len(swing_high_idx)):
-        p, q = swing_high_idx[i-1], swing_high_idx[i]
-        if q - p > lookback:
-            continue
-        if high[q] > high[p] and rsi[q] < rsi[p]:
-            strength = W_RSI_DIVERGENCE
-            if rsi[p] > 70:
-                strength += 4
-            df.loc[df.index[q]:, "rsi_div_bearish"] = strength
-    return df
-
-
 def _compute_signal_scores(df: pd.DataFrame) -> pd.DataFrame:
     """
     Computa un score compuesto ponderado (0-110+) para señales LONG y SHORT.
@@ -449,7 +377,6 @@ def _compute_signal_scores(df: pd.DataFrame) -> pd.DataFrame:
         + adx_strength * bull_directional
         + ema_dev_long + ema_dev_extreme_long
         + rsi_long + rsi_extreme_long
-        + df["rsi_div_bullish"].values
         + vol_conf_long + vol_extreme_long
         + atr_roc_long
     ).round(1)
@@ -466,7 +393,6 @@ def _compute_signal_scores(df: pd.DataFrame) -> pd.DataFrame:
         + adx_strength * bear_directional
         + ema_dev_short + ema_dev_extreme_short
         + rsi_short + rsi_extreme_short
-        + df["rsi_div_bearish"].values
         + vol_conf_short + vol_extreme_short
         + atr_roc_short
     ).round(1)
@@ -532,8 +458,6 @@ def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # RSI14
     df["rsi14"] = _rsi(df["Close"], RSI_LENGTH)
-    # Divergencias RSI-Precio (Mejora #2)
-    df = _detect_rsi_divergence(df)
 
     # Desviación del precio vs EMA55 (%)
     df["ema_deviation_pct"] = (df["Close"] - df["ema_slow"]) / df["ema_slow"] * 100
@@ -1021,60 +945,64 @@ def _smooth_states(states: np.ndarray, min_duration: int = 3) -> np.ndarray:
 
 
 
-# -- FILTRO MAESTRO DE REGIMEN HMM (reemplaza el sistema de suma de pesos) --
-def apply_regime_filter(df: pd.DataFrame, state_summary: pd.DataFrame) -> pd.DataFrame:
-    """
-    Filtro Maestro de Regimenes HMM.
-
-    El regimen HMM determina la direccion PERMITIDA para las senales:
-    - Regimen ALCISTA (bullish): Solo permite senales LONG. Bloquea SHORT.
-    - Regimen BAJISTA (bearish): Solo permite senales SHORT. Bloquea LONG.
-    - Regimen NEUTRAL: Permite ambas direcciones pero marca advertencia.
-
-    Esto reemplaza el sistema anterior de sumar W_HMM_REGIME al score compuesto.
-    El filtro NUNCA agrega senales (no crea falsos positivos),
-    solo BLOQUEA senales que contradicen la direccion del mercado.
-
-    El filtro se aplica a todo el historico para que verify_signals_historically
-    mida correctamente el WR del sistema filtrado.
-    """
-    df = df.copy()
-
-    # Mapa de bias por estado HMM
-    state_bias_map = {}
+# -- MEJORA 1A: Recalcular scores incluyendo el regimen HMM --
+def compute_signal_scores_with_hmm(df, state_summary):
+    """Anade el peso W_HMM_REGIME a los scores LONG/SHORT segun el regimen HMM."""
+    state_bias = {}
     for _, r in state_summary.iterrows():
-        state_bias_map[int(r["state"])] = _classify_regime_bias(r["description"])
-
-    # Asignar bias a cada vela segun su regimen
-    df["regime_bias"] = "neutral"
+        state_bias[int(r["state"])] = _classify_regime_bias(r["description"])
+    hmm_bullish = pd.Series(False, index=df.index)
+    hmm_bearish = pd.Series(False, index=df.index)
     if "regime" in df.columns:
-        df["regime_bias"] = df["regime"].map(state_bias_map).fillna("neutral")
+        for state, bias in state_bias.items():
+            mask = df["regime"] == state
+            if bias == "bullish":
+                hmm_bullish[mask] = True
+            elif bias == "bearish":
+                hmm_bearish[mask] = True
+    if "signal_score_long" in df.columns:
+        df["signal_score_long"] = df["signal_score_long"].astype(float) + hmm_bullish.astype(float) * W_HMM_REGIME
+    if "signal_score_short" in df.columns:
+        df["signal_score_short"] = df["signal_score_short"].astype(float) + hmm_bearish.astype(float) * W_HMM_REGIME
+    if "signal_score_long" in df.columns and "signal_score_short" in df.columns:
+        df["signal_long"] = (df["signal_score_long"] >= SIGNAL_SCORE_THRESHOLD).astype(int)
+        df["signal_short"] = (df["signal_score_short"] >= SIGNAL_SCORE_THRESHOLD).astype(int)
+    return df
 
-    # Aplicar filtro: NUNCA agregar senales, solo BLOQUEAR
-    # En regimen bajista: bloquear LONG
-    bearish_mask = df["regime_bias"] == "bearish"
-    if bearish_mask.any():
-        df.loc[bearish_mask, "signal_long"] = False
 
-    # En regimen alcista: bloquear SHORT
-    bullish_mask = df["regime_bias"] == "bullish"
-    if bullish_mask.any():
-        df.loc[bullish_mask, "signal_short"] = False
-
-    # Regimen neutral: senales permitidas pero marcar advertencia
-    df["regime_warning"] = (df["regime_bias"] == "neutral") & (
-        df["signal_long"] | df["signal_short"]
-    )
-
-    # Recalcular signal_score para que el dashboard refleje el bloqueo:
-    # poner en 0 los scores de la direccion bloqueada (solo para display)
-    df["signal_score_long_display"] = df["signal_score_long"].copy()
-    df["signal_score_short_display"] = df["signal_score_short"].copy()
-    if bearish_mask.any():
-        df.loc[bearish_mask, "signal_score_long_display"] = 0.0
-    if bullish_mask.any():
-        df.loc[bullish_mask, "signal_score_short_display"] = 0.0
-
+# -- INTEGRACION MARKOV SWITCHING: Recalcular scores incluyendo HMM + MS --
+def compute_signal_scores_with_hmm_ms(df, state_summary, ms_states, ms_summary):
+    state_bias = {}
+    for _, r in state_summary.iterrows():
+        state_bias[int(r['state'])] = _classify_regime_bias(r['description'])
+    hmm_bullish = pd.Series(False, index=df.index)
+    hmm_bearish = pd.Series(False, index=df.index)
+    if 'regime' in df.columns:
+        for state, bias in state_bias.items():
+            mask = df['regime'] == state
+            if bias == 'bullish':
+                hmm_bullish[mask] = True
+            elif bias == 'bearish':
+                hmm_bearish[mask] = True
+    ms_bias = {}
+    for _, r in ms_summary.iterrows():
+        ms_bias[int(r['state'])] = _MS._classify_ms(r['description'])
+    ms_bullish = pd.Series(False, index=df.index)
+    ms_bearish = pd.Series(False, index=df.index)
+    vl = min(len(ms_states), len(df))
+    for s, b in ms_bias.items():
+        mk = pd.Series(False, index=df.index)
+        mk.iloc[:vl] = (ms_states[:vl] == s)
+        if b == 'bullish':
+            ms_bullish[mk] = True
+        elif b == 'bearish':
+            ms_bearish[mk] = True
+    if 'signal_score_long' in df.columns:
+        df['signal_score_long'] = df['signal_score_long'].astype(float) + hmm_bullish.astype(float) * W_HMM_REGIME + ms_bullish.astype(float) * W_MS_REGIME
+    if 'signal_score_short' in df.columns:
+        df['signal_score_short'] = df['signal_score_short'].astype(float) + hmm_bearish.astype(float) * W_HMM_REGIME + ms_bearish.astype(float) * W_MS_REGIME
+    df['signal_long'] = (df['signal_score_long'] >= SIGNAL_SCORE_THRESHOLD).astype(int)
+    df['signal_short'] = (df['signal_score_short'] >= SIGNAL_SCORE_THRESHOLD).astype(int)
     return df
 
 
@@ -1219,74 +1147,10 @@ def _format_date(dt) -> str:
 
 
 def _fmt_price(val: float) -> str:
-    """Formatea precio al estilo espanol: 63.584,78$ o 1,1290$ para activos pequenos.
-    Usa 2 decimales para valores grandes (BTC) y hasta 6 decimales para valores < 10.
-    """
-    if abs(val) < 1.0:
-        n_dec = 6
-    elif abs(val) < 10.0:
-        n_dec = 4
-    else:
-        n_dec = 2
-    s = f"{val:,.{n_dec}f}"
+    """Formatea precio al estilo espanol: 63.584,78$"""
+    s = f"{val:,.2f}"
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{s}$"
-
-
-def _send_telegram_alert(message: str) -> bool:
-    """Envia una alerta por Telegram.
-    Retorna True si se envio correctamente, False si fallo o no esta configurado.
-    """
-    if not ENABLE_TELEGRAM or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-    try:
-        import urllib.request as _ur
-        import json as _json
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        data = _json.dumps({
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }).encode("utf-8")
-        req = _ur.Request(url, data=data, headers={"Content-Type": "application/json"})
-        resp = _ur.urlopen(req, timeout=15)
-        body = _json.loads(resp.read().decode("utf-8"))
-        if body.get("ok"):
-            print(f"  [Telegram] Enviado OK")
-            return True
-        else:
-            print(f"  [Telegram] Error API: {body.get('description', 'desconocido')}")
-            return False
-    except Exception as e:
-        print(f"  [Telegram] Error conexion: {e}")
-        return False
-
-
-def _build_telegram_message(asset, alertas):
-    """Construye un mensaje formateado para Telegram."""
-    lines = []
-    lines.append(f"\U0001f916 <b>TradingLatino HMM - {asset}</b>")
-    lines.append(f"{chr(45) * 30}")
-    if alertas:
-        lines.append("<b>\U0001f514 Alertas Detectadas:</b>")
-        for a in alertas:
-            lines.append(a)
-    else:
-        lines.append("\u2705 Sin alertas nuevas.")
-    lines.append(f"{chr(45) * 30}")
-    lines.append("<i>Enviado por TradingLatino HMM Bot</i>")
-    return "\n".join(lines)
-
-
-def _send_telegram_alerts_batch(asset, alertas):
-    """Envia todas las alertas en un solo mensaje de Telegram."""
-    if not ENABLE_TELEGRAM or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-    if not alertas:
-        return False
-    message = _build_telegram_message(asset, alertas)
-    return _send_telegram_alert(message)
 
 
 def _find_signal_start(df: pd.DataFrame, signal_col: str) -> int:
@@ -1419,9 +1283,9 @@ def compute_signal(df: pd.DataFrame, timeframe: Optional[str] = None) -> Dict[st
             + min(30, max(0, (last["adx"] - ADX_THRESHOLD) * 3))
         ))
 
-    # Signal score compuesto (usar display filtrando scores bloqueados por regimen)
-    score_long = float(last.get("signal_score_long_display", last.get("signal_score_long", 0)))
-    score_short = float(last.get("signal_score_short_display", last.get("signal_score_short", 0)))
+    # Signal score compuesto
+    score_long = float(last.get("signal_score_long", 0))
+    score_short = float(last.get("signal_score_short", 0))
 
     # --- Desglose de score SHORT (para visualización en dashboard) ---
     score_breakdown_short = {
@@ -1439,7 +1303,6 @@ def compute_signal(df: pd.DataFrame, timeframe: Optional[str] = None) -> Dict[st
         "Vol > 1.5x + bajista":       bool(last.get("vol_ratio", 0) > 1.5 and last.get("ema_deviation_pct", 0) < 0) * W_VOLUME,
         "Vol > 3x":                   bool(last.get("vol_ratio", 0) > 3) * 4,
         "ATR ROC > 0.2 + bajista":    bool(last.get("atr_roc", 0) > 0.2 and last.get("ema_deviation_pct", 0) < 0) * W_ATR_ROC,
-        "RSI Div Bajista":          float(last.get("rsi_div_bearish", 0)),
     }
     score_breakdown_long = {
         "Tendencia Alcista":          bool(last["bull_bias"]) * W_BULL_BIAS,
@@ -1456,7 +1319,6 @@ def compute_signal(df: pd.DataFrame, timeframe: Optional[str] = None) -> Dict[st
         "Vol > 1.5x + alcista":       bool(last.get("vol_ratio", 0) > 1.5 and last.get("ema_deviation_pct", 0) > 0) * W_VOLUME,
         "Vol > 3x":                   bool(last.get("vol_ratio", 0) > 3) * 4,
         "ATR ROC > 0.2 + alcista":    bool(last.get("atr_roc", 0) > 0.2 and last.get("ema_deviation_pct", 0) > 0) * W_ATR_ROC,
-        "RSI Div Alcista":          float(last.get("rsi_div_bullish", 0)),
     }
     # Threshold dinámico basado en volatilidad (ATR ratio)
     atr_series = df["atr"]
@@ -2067,6 +1929,12 @@ class TimeframeData:
     regime_changes: List[Dict]
     verification: Optional[Dict[str, Any]] = None
     trailing_verification: Optional[Dict[str, Any]] = None
+    # Datos MS para comparacion
+    ms_states: Optional[np.ndarray] = None
+    ms_summary: Optional[pd.DataFrame] = None
+    ms_signal_info: Optional[Dict[str, Any]] = None
+    ms_regime_changes: Optional[List[Dict]] = None
+    ms_verification: Optional[Dict[str, Any]] = None
 
 
 def _calculate_regime_entropy(trans_mat: np.ndarray, state: int) -> float:
@@ -4897,11 +4765,6 @@ def _make_price_chart(df: pd.DataFrame, states: np.ndarray, asset: str, timefram
     fmt_low   = [_fmt_price(float(v)) for v in df["Low"]]
     fmt_close = [_fmt_price(float(v)) for v in df["Close"]]
     fmt_vol_full = [f"{v:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".") for v in df["Volume"]]
-    # Texto hover pre-formateado (evita problemas con customdata en candlestick)
-    hover_texts = [
-        f"{idx.strftime('%d-%m-%Y')}<br><b>Open:</b> {o}<br><b>High:</b> {h}<br><b>Low:</b> {l}<br><b>Close:</b> {c}"
-        for idx, o, h, l, c in zip(df.index, fmt_open, fmt_high, fmt_low, fmt_close)
-    ]
 
     # --- Fila 1: Velas Japonesas ---
     fig.add_trace(go.Candlestick(
@@ -4913,8 +4776,12 @@ def _make_price_chart(df: pd.DataFrame, states: np.ndarray, asset: str, timefram
         decreasing=dict(line=dict(color="#F23645", width=1), fillcolor="#F23645"),
         whiskerwidth=0.2,
         showlegend=False,
-        text=hover_texts,
-        hoverinfo="text",
+        customdata=np.stack([fmt_open, fmt_high, fmt_low, fmt_close], axis=-1),
+        hovertemplate=("%{x|%d-%m-%Y}<br>"
+            "<b>Open:</b> %{customdata[0]}<br>"
+            "<b>High:</b> %{customdata[1]}<br>"
+            "<b>Low:</b> %{customdata[2]}<br>"
+            "<b>Close:</b> %{customdata[3]}<extra></extra>"),
     ), row=1, col=1)
 
     # -- Senal LONG --
@@ -4957,12 +4824,12 @@ def _make_price_chart(df: pd.DataFrame, states: np.ndarray, asset: str, timefram
         customdata=np.stack([fmt_vol_full], axis=-1),
     ), row=2, col=1)
 
-    # --- Layout unificado (identico al grafico Precio + EMA 55) ---
+    # --- Layout (estilo indicators chart - funcional) ---
     fig.update_layout(
         template="plotly_dark",
-        height=500,
+        height=520,
         dragmode="pan",
-        margin=dict(l=40, r=20, t=10, b=30),
+        margin=dict(l=40, r=20, t=20, b=40),
         hovermode="x unified",
         hoverlabel=dict(
             bgcolor="#1a1a24", bordercolor="#444",
@@ -4978,34 +4845,38 @@ def _make_price_chart(df: pd.DataFrame, states: np.ndarray, asset: str, timefram
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         barmode="overlay",
+    )
 
-        # Eje X superior (oculto, el inferior es el compartido)
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                   rangeslider=dict(visible=False)),
-
-        # Eje X inferior (compartido) — con rangeslider + botones
-        xaxis2=dict(
-            showgrid=False, zeroline=False,
-            rangeslider=dict(visible=True, thickness=0.1),
-            rangeselector=dict(
-                buttons=list([
-                    dict(count=1, label="1M", step="month", stepmode="backward"),
-                    dict(count=3, label="3M", step="month", stepmode="backward"),
-                    dict(count=6, label="6M", step="month", stepmode="backward"),
-                    dict(step="all", label="ALL"),
-                ]),
-                bgcolor="rgba(255,255,255,0.05)",
-                activecolor="rgba(46,204,64,0.3)",
-                font=dict(color="white", size=10),
-                x=0, y=1.02,
-            ),
-            showspikes=True, spikethickness=1, spikedash="solid",
-            spikemode="across", spikesnap="cursor", spikecolor="#888",
+    # -- Eje X (via update_xaxes como el indicators chart) --
+    fig.update_xaxes(
+        showgrid=False, zeroline=False,
+        rangeslider=dict(visible=False),
+        rangeselector=dict(
+            buttons=list([
+                dict(count=1, label="1M", step="month", stepmode="backward"),
+                dict(count=3, label="3M", step="month", stepmode="backward"),
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(step="all", label="ALL"),
+            ]),
+            bgcolor="rgba(255,255,255,0.05)",
+            activecolor="rgba(46,204,64,0.3)",
+            font=dict(color="white", size=10),
+            x=0, y=1.02,
         ),
+        showspikes=True, spikethickness=1, spikedash="solid",
+        spikemode="across", spikesnap="cursor", spikecolor="#888",
+    )
 
-        # Ejes Y
-        yaxis=dict(showgrid=True, gridcolor="#2a2a35", zeroline=False, tickformat=".0f"),
-        yaxis2=dict(showgrid=True, gridcolor="#2a2a35", zeroline=False, title="", tickformat=".0f"),
+    # -- Ejes Y (via update_yaxes como el indicators chart) --
+    fig.update_yaxes(
+        showgrid=True, gridcolor="#2a2a35", gridwidth=0.5,
+        zeroline=False, tickformat=".0f",
+        row=1, col=1,
+    )
+    fig.update_yaxes(
+        showgrid=True, gridcolor="#2a2a35", gridwidth=0.5,
+        zeroline=False, title="", tickformat=".0f",
+        row=2, col=1,
     )
     return fig
 
@@ -5030,11 +4901,6 @@ def _make_simple_price_chart(df: pd.DataFrame, asset: str, timeframe: str) -> go
     fmt_low   = [_fmt_price(float(v)) for v in df["Low"]]
     fmt_close = [_fmt_price(float(v)) for v in df["Close"]]
     fmt_vol_full = [f"{v:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".") for v in df["Volume"]]
-    # Texto hover pre-formateado (evita problemas con customdata en candlestick)
-    hover_texts = [
-        f"{idx.strftime('%d-%m-%Y')}<br><b>Open:</b> {o}<br><b>High:</b> {h}<br><b>Low:</b> {l}<br><b>Close:</b> {c}"
-        for idx, o, h, l, c in zip(df.index, fmt_open, fmt_high, fmt_low, fmt_close)
-    ]
 
     # ── Fila 1: Velas Japonesas ──
     fig.add_trace(go.Candlestick(
@@ -5046,8 +4912,12 @@ def _make_simple_price_chart(df: pd.DataFrame, asset: str, timeframe: str) -> go
         decreasing=dict(line=dict(color="#F23645", width=2.0), fillcolor="#F23645"),
         whiskerwidth=0.7,
         showlegend=False,
-        text=hover_texts,
-        hoverinfo="text",
+        customdata=np.stack([fmt_open, fmt_high, fmt_low, fmt_close], axis=-1),
+        hovertemplate=("%{x|%d-%m-%Y}<br>"
+            "<b>Open:</b> %{customdata[0]}<br>"
+            "<b>High:</b> %{customdata[1]}<br>"
+            "<b>Low:</b> %{customdata[2]}<br>"
+            "<b>Close:</b> %{customdata[3]}<extra></extra>"),
     ), row=1, col=1)
 
     # ── EMA 55 (blanco) ──
@@ -5318,14 +5188,6 @@ def main():
             df = compute_all_indicators(df)
             print(f"  Indicadores calculados ({time.time()-t0:.1f}s)")
 
-            # -- Re-aplicar threshold y consecutive bars optimizados por timeframe --
-            tf_th = SIGNAL_THRESHOLDS.get(tf, SIGNAL_SCORE_THRESHOLD)
-            tf_cons = MIN_CONSECUTIVE_BY_TF.get(tf, MIN_CONSECUTIVE_BARS)
-            df["signal_raw_long"] = df["signal_score_long"] >= tf_th
-            df["signal_raw_short"] = df["signal_score_short"] >= tf_th
-            df["signal_long"] = _consecutive_bars_filter(df["signal_raw_long"], tf_cons)
-            df["signal_short"] = _consecutive_bars_filter(df["signal_raw_short"], tf_cons)
-
             # 3) HMM - features + entrenamiento
             t0 = time.time()
             features_df = build_hmm_features(df)
@@ -5333,13 +5195,35 @@ def main():
             n_states = state_summary["state"].nunique()
             print(f"  HMM entrenado: {n_states} estados ({time.time()-t0:.1f}s)")
 
-            # -- FILTRO MAESTRO DE REGIMEN HMM (reemplaza la suma de pesos) --
-            # El regimen determina la direccion PERMITIDA:
-            #   alcista → solo LONG, bajista → solo SHORT, neutral → ambas
-            # Esto elimina falsos positivos en direccion contraria al mercado
-            df = apply_regime_filter(df, state_summary)
+            # -- MEJORA 1A: Recalcular scores con peso del regimen HMM --
+            df = compute_signal_scores_with_hmm(df, state_summary)
 
-            # -- Detectar senales precursoras de cambios de tendencia --
+            # -- INTEGRACION MARKOV SWITCHING: Ajustar MS y recalcular scores --
+            ms_ok = False
+            ms_states = np.array([])
+            ms_summary = pd.DataFrame()
+            ms_signal_info = None
+            ms_verification = None
+            ms_changes = []
+            try:
+                ms_res = _MS.fit_markov_switching(df)
+                if ms_res and len(ms_res) >= 5:
+                    mf, mst, mpr, mm, mss = ms_res
+                    if mf is not None and len(mst) > 0:
+                        ms_ok = True
+                        ms_states = mst
+                        ms_summary = mss
+                        df = compute_signal_scores_with_hmm_ms(df, state_summary, ms_states, ms_summary)
+                        ms_signal_info = compute_signal(df, timeframe=tf)
+                        ms_verification = verify_signals_historically(df, tf)
+                        ms_changes = _MS.find_ms_regime_changes(ms_states, df.index, ms_summary)
+                        print(f'  MS OK: {ms_signal_info.get("signal", "N/A")} WR={ms_verification.get("overall_win_rate", 0):.1f}%')
+            except Exception as e:
+                print(f'  MS fallo: {e}')
+            if not ms_ok:
+                print('  MS: omitido')
+
+            # -- ENFOQUE A: Detectar senales precursoras de cambios de tendencia --
             df = compute_precursor_signals(df)
 
             # 4) Senal actual
@@ -5350,26 +5234,6 @@ def main():
 
             # 5) Verificacion historica
             verification = verify_signals_historically(df, tf)
-            if verification and verification["total_signals"] > 0:
-                print(f"  VERIFICACION: "
-                      f"LONG {verification['stats']['LONG']['win_rate']:.1f}% "
-                      f"({verification['stats']['LONG']['num_signals']} senales) | "
-                      f"SHORT {verification['stats']['SHORT']['win_rate']:.1f}% "
-                      f"({verification['stats']['SHORT']['num_signals']} senales) | "
-                      f"GLOBAL {verification['overall_win_rate']:.1f}% "
-                      f"({verification['total_signals']} senales)")
-            else:
-                print(f"  VERIFICACION: Sin senales en el periodo")
-
-            # -- TRAILING STOP VERIFICATION (usa valores optimizados por TF) --
-            trailing_verification = verify_with_trailing_stop(
-                df, tf, TRAILING_STOP_PCT_OPT.get(tf, TRAILING_STOP_PCT.get(tf, 50.0))
-            )
-            if trailing_verification and trailing_verification["total_signals"] > 0:
-                print(f"  TRAILING: "
-                      f"TP-Fijo {trailing_verification['overall_win_rate_tp']:.1f}% | "
-                      f"Trail {trailing_verification['overall_win_rate_ts']:.1f}% | "
-                      f"Comb {trailing_verification['overall_win_rate_combined']:.1f}%")
 
             # 6) Cambios de regimen
             regime_changes = _detect_regime_changes(states, df.index, state_summary, max_alerts=15)
@@ -5383,7 +5247,11 @@ def main():
                 signal_info=signal_info,
                 regime_changes=regime_changes,
                 verification=verification,
-                trailing_verification=trailing_verification,
+                ms_states=ms_states if ms_ok else None,
+                ms_summary=ms_summary if ms_ok else None,
+                ms_signal_info=ms_signal_info,
+                ms_regime_changes=ms_changes if ms_ok else None,
+                ms_verification=ms_verification,
             )
             print(f"  Listo.")
         except Exception as e:
@@ -5417,77 +5285,53 @@ def main():
         except:
             prev_state = {}
     
-    # Estado actual - registrar senales de TODOS los timeframes
-    current_state = {}
-    for tf_key in TIMEFRAMES:
-        if tf_key in results:
-            sig = results[tf_key].signal_info.get("signal", "FLAT")
-            price = results[tf_key].signal_info.get("price", 0)
-            strength = results[tf_key].signal_info.get("strength", 0)
-            current_state[f"{tf_key}_signal"] = sig
-            current_state[f"{tf_key}_price"] = price
-            current_state[f"{tf_key}_strength"] = strength
-            current_state[f"{tf_key}_score_long"] = results[tf_key].signal_info.get("signal_score_long", 0)
-            current_state[f"{tf_key}_score_short"] = results[tf_key].signal_info.get("signal_score_short", 0)
-        else:
-            current_state[f"{tf_key}_signal"] = "N/A"
-            current_state[f"{tf_key}_price"] = 0
+    # Estado actual
+    current_state = {
+        "1h_signal": results["1h"].signal_info.get("signal", "FLAT") if "1h" in results else "N/A",
+        "1h_price": results["1h"].signal_info.get("price", 0) if "1h" in results else 0,
+        "4h_signal": results["4h"].signal_info.get("signal", "FLAT") if "4h" in results else "N/A",
+        "1d_signal": results["1d"].signal_info.get("signal", "FLAT") if "1d" in results else "N/A",
+    }
     
     alertas = []
     
-    # Alertas por cada timeframe: detectar cambios de senal
-    for tf_key in TIMEFRAMES:
-        if tf_key not in results:
-            continue
-        curr_sig = current_state.get(f"{tf_key}_signal", "FLAT")
-        prev_sig = prev_state.get(f"{tf_key}_signal", "N/A")
-        curr_price_val = current_state.get(f"{tf_key}_price", 0)
-        curr_strength = current_state.get(f"{tf_key}_strength", 0)
-        tf_label = tf_key.upper()
-
-        # Primera ejecucion: no hay estado previo -> enviar alerta si hay senal
-        if prev_sig == "N/A" and curr_sig in ("LONG", "SHORT"):
-            direction_emoji = "🟢" if curr_sig == "LONG" else "🔴"
-            msg = (f"{direction_emoji} {ASSET} [{tf_label}] SENAL INICIAL {curr_sig}!\n"
-            f"Precio: {_fmt_price(curr_price_val)}\n"
-            f"Fuerza: {curr_strength}%")
-            alertas.append(msg)
-        
-        # Cambio a LONG
-        elif curr_sig == "LONG" and prev_sig not in ("LONG", "N/A"):
-            msg = (f"🟢 {ASSET} [{tf_label}] CAMBIO a LONG!\n"
-            f"Precio: {_fmt_price(curr_price_val)}\n"
-            f"Fuerza: {curr_strength}%")
-            alertas.append(msg)
-        
-        # Cambio a SHORT
-        elif curr_sig == "SHORT" and prev_sig not in ("SHORT", "N/A"):
-            msg = (f"🔴 {ASSET} [{tf_label}] CAMBIO a SHORT!\n"
-            f"Precio: {_fmt_price(curr_price_val)}\n"
-            f"Fuerza: {curr_strength}%")
-            alertas.append(msg)
+    # Alerta 1: PRECIO ROMPE $62,700 (transicion: antes arriba, ahora abajo)
+    prev_price = prev_state.get("1h_price", 0)
+    curr_price = current_state["1h_price"]
+    if prev_price >= 62700 and curr_price > 0 and curr_price < 62700:
+        alertas.append(f"[ATENCION] BTC ROMPIO SOPORTE de $62,700! Precio actual: {_fmt_price(curr_price)}")
+    elif curr_price < 62700 and prev_price == 0:
+        alertas.append(f"[INFO] BTC por debajo de $62,700 ({_fmt_price(curr_price)}). Estado inicial.")
+    
+    # Alerta 2: 1H CAMBIA a LONG (transicion: antes no era LONG, ahora es LONG)
+    prev_signal_1h = prev_state.get("1h_signal", "N/A")
+    curr_signal_1h = current_state["1h_signal"]
+    if curr_signal_1h == "LONG" and prev_signal_1h != "LONG":
+        strength_1h = results["1h"].signal_info.get("strength", 0) if "1h" in results else 0
+        alertas.append(f"[OPORTUNIDAD] 1H CAMBIO a LONG! {ASSET} a {_fmt_price(curr_price)} - Fuerza: {strength_1h}%")
+    
+    # Alerta 3: 4H CAMBIA a LONG (confirmacion de tendencia)
+    prev_signal_4h = prev_state.get("4h_signal", "N/A")
+    curr_signal_4h = current_state["4h_signal"]
+    if curr_signal_4h == "LONG" and prev_signal_4h != "LONG":
+        alertas.append(f"[CONFIRMACION] 4H CAMBIO a LONG! Tendencia alcista confirmada.")
     
     # Guardar estado actual para la proxima ejecucion
     os.makedirs(os.path.dirname(state_file_path), exist_ok=True)
     with open(state_file_path, "w") as sf:
         json.dump(current_state, sf)
+    
     if alertas:
+        print(f"\n{'='*60}")
+        print(">>> ALERTAS DEL SISTEMA <<<")
+        print(f"\n{'='*60}")
         for a in alertas:
-            try:
-                print(f"  {a}")
-            except UnicodeEncodeError:
-                clean = a.encode('ascii', 'ignore').decode('ascii')
-                print(f"  {clean}")
-        if ENABLE_TELEGRAM:
-            sent = _send_telegram_alerts_batch(ASSET, alertas)
-            if sent:
-                print(f"  [Telegram] Alertas enviadas ({len(alertas)} alertas)")
-            else:
-                print(f"  [Telegram] Fallo al enviar alertas")
+            print(f"  {a}")
+        print(f"\n{'='*60}")
+    # Abrir en navegador
     print(f"\n{'='*60}")
-    if OPEN_BROWSER:
-        print("Abriendo en el navegador...")
-        webbrowser.open(str(output_path.resolve()))
+    print("Abriendo en el navegador...")
+    webbrowser.open(str(output_path.resolve()))
     print(f"{'='*60}")
     print("Listo!")
     print(f"{'='*60}")
@@ -5495,14 +5339,11 @@ def main():
 
 
 if __name__ == "__main__":
-    # Parse arguments from command line
+    # Parse --asset argument from command line
     import sys as _sys
-    _args_list = _sys.argv[1:]
-    for _i, _arg in enumerate(_args_list, 1):
-        if _arg == "--asset" and _i < len(_args_list):
-            ASSET = _args_list[_i]
+    for _i, _arg in enumerate(_sys.argv[1:], 1):
+        if _arg == "--asset" and _i + 1 < len(_sys.argv):
+            ASSET = _sys.argv[_i + 1]
             print(f"Activo seleccionado: {ASSET}")
-    if "--headless" in _args_list or os.environ.get("CI") == "true":
-        OPEN_BROWSER = False
-        print("Modo headless: no se abrira el navegador")
+            break
     main()

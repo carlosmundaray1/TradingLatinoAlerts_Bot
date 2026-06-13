@@ -1,0 +1,22 @@
+GRID SEARCH MS RESULTS
+------------------------------------------------------------
+Timestamp: 2026-06-10T14:22:44.125497
+Asset: BTC-USD
+Combinations: 60
+
+TOP 10:
+  1. W_MS= 3 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  2. W_MS= 6 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  3. W_MS= 9 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  4. W_MS=12 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  5. W_MS=15 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  6. W_MS=18 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  7. W_MS=21 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  8. W_MS=24 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+  9. W_MS=27 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+ 10. W_MS=30 Th=80 Score=  58.4 Det_d= 72.4% WR_d= 84.1% FP=310 FN= 21
+
+BEST: W_MS=3 THRESHOLD=80
+Score: 58.4
+Det_1d: 72.4%
+WR_1d: 84.1%

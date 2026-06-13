@@ -1,0 +1,238 @@
+
+======================================================================
+  VERIFICACION XRP-USD
+======================================================================
+Ejecucion: 2026-06-11 14:49
+
+======================================================================
+  ANALISIS XRP-USD [1d]
+======================================================================
+
+[1/5] Cargando datos...
+  2021-06-11 a 2026-06-10, 1826 velas
+
+[2/5] Indicadores...
+
+[3/5] HMM...
+  Estados: 5
+    S0: [VOLATILIDAD NEUTRA] (15.6%)
+    S1: [TREND ALCISTA] (26.4%)
+    S2: [TREND ALCISTA] (11.9%)
+    S3: [TREND BAJISTA] (23.4%)
+    S4: [TREND BAJISTA] (22.7%)
+
+[4/5] Scores...
+
+[5/5] Senal + verificacion...
+
+  Senal ACTUAL: SHORT
+  Precio: $1.0972
+  Fuerza: 90%
+  Score LONG: 28
+  Score SHORT: 75
+  Threshold: 65
+  Regimen: Estado 1 [TREND ALCISTA]
+
+  --- DESGLOSE SHORT ---
+    [OK] Tendencia Bajista: +16
+    [OK] Squeeze OFF: +15
+    [OK] SMI Delta < 0: +12
+    [OK] SMI Hist < 0: +10
+    [OK] EMA Dev < -3%: +6
+    [OK] ADX > 23: +5
+    [OK] EMA Dev < -8%: +5
+    [OK] RSI < 45: +4
+    [OK] ADX Delta + DI- > DI+: +2
+    [NO] Squeeze Release: +0
+    [NO] RSI > 80: +0
+    [NO] Vol > 1.5x + bajista: +0
+    [NO] Vol > 3x: +0
+    [NO] ATR ROC > 0.2 + bajista: +0
+    TOTAL: 75 (threshold: 65)
+
+  --- CONDICIONES ---
+    [NO] Tendencia Alcista (Bull Bias)
+    [OK] Tendencia Bajista (Bear Bias)
+    [OK] Squeeze OFF ( expansión)
+    [NO] Squeeze Release (compresión previa)
+    [NO] SMI Hist > 0 (momentum alcista)
+    [OK] SMI Hist < 0 (momentum bajista)
+    [NO] SMI Delta > 0 (aceleración alcista)
+    [OK] SMI Delta < 0 (aceleración bajista)
+    [OK] ADX > 23.0 (tendencia fuerte)
+    [OK] ADX Delta > 0 (tendencia fortaleciéndose)
+    [OK] Threshold dinámico: 60
+
+  --- SHORT HISTORICAS (289) ---
+  WR (TP fijo): 245/289 = 84.8%
+  Retorno favorable prom: +10.72%
+  Velas prom hasta ganar: 2.9
+
+  Ultimas 10 SHORT:
+    2026-05-26: $1.3277 max=+20.56% [WIN]
+    2026-05-25: $1.3494 max=+21.84% [WIN]
+    2026-05-24: $1.3500 max=+21.88% [WIN]
+    2026-04-04: $1.3156 max=+2.63% [WIN]
+    2026-04-03: $1.3179 max=+2.80% [WIN]
+    2026-04-02: $1.3187 max=+2.86% [WIN]
+    2026-04-01: $1.3478 max=+4.95% [WIN]
+    2026-03-31: $1.3403 max=+4.42% [WIN]
+    2026-03-30: $1.3226 max=+3.14% [WIN]
+    2026-03-29: $1.3273 max=+3.49% [WIN]
+
+  Perdedoras (falsos +):
+    2021-07-20: $0.5293 max=+1.70% fin=-34.65%
+    2021-07-21: $0.5700 max=+1.45% fin=-28.16%
+    2021-09-21: $0.8763 max=+0.77% fin=-23.87%
+    2021-09-28: $0.8937 max=+0.64% fin=-23.29%
+    2021-12-17: $0.7993 max=+0.81% fin=-3.99%
+    2022-02-24: $0.6963 max=+1.50% fin=-5.92%
+    2022-05-12: $0.3852 max=+1.16% fin=-2.07%
+    2023-01-08: $0.3454 max=+0.31% fin=-16.10%
+    2023-02-13: $0.3717 max=+1.63% fin=-2.00%
+    2023-05-11: $0.4219 max=+0.99% fin=-7.55%
+    2023-05-13: $0.4249 max=+1.11% fin=-11.14%
+    2023-05-14: $0.4259 max=+1.33% fin=-13.39%
+    2023-07-06: $0.4637 max=+0.67% fin=-71.23%
+    2023-09-11: $0.4744 max=+0.76% fin=-6.55%
+    2023-09-12: $0.4807 max=+1.21% fin=-4.36%
+    2023-09-13: $0.4838 max=+0.65% fin=-3.27%
+    2023-10-12: $0.4830 max=+0.91% fin=-14.62%
+    2023-10-13: $0.4857 max=+1.45% fin=-12.44%
+    2023-10-14: $0.4868 max=+1.67% fin=-12.04%
+    2023-10-15: $0.4878 max=+1.88% fin=-14.05%
+    2024-02-01: $0.5059 max=+1.51% fin=-11.25%
+    2024-05-13: $0.5049 max=+1.48% fin=-5.72%
+    2024-05-14: $0.4999 max=+0.49% fin=-5.67%
+    2024-07-08: $0.4315 max=+0.82% fin=-40.83%
+    2024-09-06: $0.5213 max=+0.25% fin=-12.24%
+    2024-09-07: $0.5251 max=+0.63% fin=-13.91%
+    2024-09-08: $0.5293 max=+1.01% fin=-11.02%
+    2024-10-05: $0.5295 max=+1.48% fin=-2.79%
+    2024-10-25: $0.5019 max=+1.65% fin=-10.39%
+    2024-11-03: $0.5029 max=+1.22% fin=-109.64%
+    2024-11-04: $0.5032 max=+0.24% fin=-122.15%
+    2025-03-11: $2.1669 max=+1.15% fin=-13.13%
+    2025-04-10: $1.9665 max=+0.84% fin=-12.11%
+    2025-06-05: $2.0976 max=+0.43% fin=-3.26%
+    2025-06-26: $2.1059 max=+1.60% fin=-20.93%
+    2025-09-01: $2.7537 max=+0.11% fin=-8.84%
+    2025-09-25: $2.7423 max=+1.40% fin=-2.28%
+    2025-10-17: $2.2942 max=-0.01% fin=-9.35%
+    2025-10-18: $2.3605 max=+1.67% fin=-6.13%
+    2025-11-22: $1.9498 max=+0.00% fin=-4.25%
+    2025-12-18: $1.8078 max=+1.94% fin=-3.88%
+    2025-12-25: $1.8318 max=+1.11% fin=-15.85%
+    2026-03-01: $1.3517 max=+1.69% fin=-7.09%
+    2026-03-08: $1.3414 max=+0.35% fin=-3.24%
+
+  LONG: 286 senales, WR=88.1%
+
+  TRAILING SHORT: 245/289 = 84.8%
+
+======================================================================
+  ANALISIS XRP-USD [1wk]
+======================================================================
+
+[1/5] Cargando datos...
+  2017-11-06 a 2026-06-01, 448 velas
+
+[2/5] Indicadores...
+
+[3/5] HMM...
+  Estados: 5
+    S0: [EXPANSION BAJISTA] (19.6%)
+    S1: [EXPANSION ALCISTA] (17.1%)
+    S2: [EXPANSION BAJISTA] (36.7%)
+    S3: [EXPANSION ALCISTA] (8.9%)
+    S4: [EXPANSION ALCISTA] (17.8%)
+
+[4/5] Scores...
+
+[5/5] Senal + verificacion...
+
+  Senal ACTUAL: FLAT
+  Precio: $1.1547
+  Fuerza: 0%
+  Score LONG: 25
+  Score SHORT: 64
+  Threshold: 65
+  Regimen: Estado 2 [EXPANSION BAJISTA]
+
+  --- CONDICIONES ---
+    [NO] Tendencia Alcista (Bull Bias)
+    [OK] Tendencia Bajista (Bear Bias)
+    [NO] Squeeze OFF ( expansión)
+    [OK] Squeeze Release (compresión previa)
+    [NO] SMI Hist > 0 (momentum alcista)
+    [OK] SMI Hist < 0 (momentum bajista)
+    [OK] SMI Delta > 0 (aceleración alcista)
+    [NO] SMI Delta < 0 (aceleración bajista)
+    [OK] ADX > 23.0 (tendencia fuerte)
+    [OK] ADX Delta > 0 (tendencia fortaleciéndose)
+    [OK] Threshold dinámico: 62
+
+  --- SHORT HISTORICAS (65) ---
+  WR (TP fijo): 61/65 = 93.8%
+  Retorno favorable prom: +18.14%
+  Velas prom hasta ganar: 2.7
+
+  Ultimas 10 SHORT:
+    2026-02-02: $1.4322 max=+11.13% [WIN]
+    2026-01-26: $1.5913 max=+28.77% [WIN]
+    2026-01-19: $1.8330 max=+38.16% [WIN]
+    2025-12-22: $1.8644 max=+39.20% [WIN]
+    2025-12-15: $1.9220 max=+41.03% [WIN]
+    2025-11-17: $2.0463 max=+44.61% [WIN]
+    2024-07-01: $0.4198 max=+3.61% [WIN]
+    2024-06-24: $0.4755 max=+17.74% [WIN]
+    2024-06-17: $0.4795 max=+18.43% [WIN]
+    2024-06-10: $0.4888 max=+19.98% [WIN]
+
+  Perdedoras (falsos +):
+    2018-12-10: $0.2879 max=+0.71% fin=-8.74%
+    2020-03-16: $0.1502 max=+0.68% fin=-27.56%
+    2020-03-23: $0.1638 max=+0.40% fin=-13.29%
+    2023-01-02: $0.3454 max=+0.31% fin=-50.27%
+
+  LONG: 79 senales, WR=96.2%
+
+  TRAILING SHORT: 61/65 = 93.8%
+
+======================================================================
+  HMM vs MS - XRP-USD 1d
+======================================================================
+
+--- HMM ---
+  Senal: FLAT S=50 L=16
+  WR: 86.9%  SHORT: 87.4%(334) LONG: 86.3%(270)
+
+--- MS ---
+  Senal: SHORT S=73 L=32
+  WR: 86.0%  SHORT: 86.2%(457) LONG: 85.6%(257)
+
+======================================================================
+  HMM vs MS - XRP-USD 1wk
+======================================================================
+
+--- HMM ---
+  Senal: SHORT S=69 L=32
+  WR: 96.5%  SHORT: 97.0%(67) LONG: 95.9%(74)
+
+--- MS ---
+  Senal: FLAT S=46 L=27
+  WR: 96.9%  SHORT: 100.0%(31) LONG: 95.9%(98)
+
+======================================================================
+  VEREDICTO
+======================================================================
+
+  1d: SHORT (S=75/L=28)
+  WR SHORT: 84.8% (289 senales)
+  -> CONFIABLE (WR>=70%)
+
+  1wk: FLAT (S=64/L=25)
+  WR SHORT: 93.8% (65 senales)
+  -> CONFIABLE (WR>=70%)
+
+Resultados: verificacion_xrp_resultados.txt

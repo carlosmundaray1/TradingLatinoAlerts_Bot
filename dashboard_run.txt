@@ -1,0 +1,126 @@
+Model is not converging.  Current: -25383.386993384087 is not greater than -25383.386937803232. Delta is -5.558085467782803e-05
+========================================================================
+  TRADINGLATINO HMM DASHBOARD
+  Análisis de Regímenes de Mercado con HMM
+========================================================================
+
+────────────────────────────────────────────────────────────────────────
+  PROCESANDO: BTC-USD @ 1d
+────────────────────────────────────────────────────────────────────────
+  [YFINANCE] Descargando BTC-USD @ 1d ...
+    [1/4] yf.download() - 1d...
+      -> yf.download() exitoso: 4281 velas.
+  Datos: 4281 velas (2014-09-17 → 2026-06-06)
+  [AUTO-TUNE] Buscando kc_mult óptimo para 1d...
+    kc_mult  squeeze_rate  candidates  score
+     1.00     0.6%      22     -2.0
+     1.25     3.9%     109      2.6
+     1.50    11.0%     195      7.4
+     1.75    20.9%     269     15.0 <<<
+     2.00    30.6%     299     15.0
+     2.25    40.3%     331     12.0
+     2.50    48.7%     352     10.9
+     2.75    56.9%     359      9.9
+     3.00    64.0%     331      9.0
+     3.25    69.9%     282      8.3
+     3.50    74.7%     258      7.7
+     3.75    78.9%     231      7.1
+     4.00    82.0%     210      6.7
+     4.25    85.0%     183      6.4
+     4.50    87.4%     150      6.1
+     4.75    89.3%     139      5.8
+     5.00    91.4%     114      5.6
+    -> Mejor kc_mult = 1.75 (squeeze_rate=20.9%, candidates=269)
+
+  Calculando indicadores (kc_mult=1.75)...
+  Squeeze ON: 895/4281 (20.9% de velas)
+  Bias: BULL=2199, BEAR=1694 velas
+  Cota superior (squeeze_off + squeeze_released): 269 velas candidatas
+  Construyendo features para HMM ...
+  Features: 11 variables, 4206 filas sin NaN.
+  Entrenando HMM (selección por BIC) ...
+  Mejor modelo: 4 estados (BIC=50780.22).
+  Reetiquetando estados por volatilidad ...
+  Resumen por estado:
+ state  pct_time  mean_return  volatility  mean_duration_bars
+     0 27.009035     0.001906    0.030890           25.818182
+     1 21.279125     0.001961    0.031827            9.132653
+     2 34.284356    -0.000331    0.035844           14.137255
+     3 17.427485     0.002184    0.043827           15.270833
+  Computando alerta hibrida HMM+Precursor...
+    [WARN] Error al computar alerta hibrida: 'bull_bias'
+  Ejecutando parameter sweep (min_trades=15, kc_mult=1.75) ...
+    -> 108 combinaciones válidas (de 108 totales).
+    [SWEEP] Precalculando indicadores base (kc_mult=1.75)...
+    [SWEEP] Precalculando volume profiles para [75]...
+      [VP] Precalculando volume profile con lookback=75...
+    [SWEEP] Ejecutando 108 backtests...
+      Progreso: 1/108 (0%) - 1 válidos - ETA: 165s (2.8min)
+      Progreso: 5/108 (4%) - 5 válidos - ETA: 160s (2.7min)
+      Progreso: 10/108 (9%) - 6 válidos - ETA: 153s (2.5min)
+      Progreso: 15/108 (13%) - 9 válidos - ETA: 144s (2.4min)
+      Progreso: 20/108 (18%) - 12 válidos - ETA: 137s (2.3min)
+      Progreso: 25/108 (23%) - 13 válidos - ETA: 129s (2.2min)
+      Progreso: 30/108 (27%) - 18 válidos - ETA: 123s (2.0min)
+      Progreso: 35/108 (32%) - 18 válidos - ETA: 114s (1.9min)
+      Progreso: 40/108 (37%) - 22 válidos - ETA: 106s (1.8min)
+      Progreso: 45/108 (41%) - 24 válidos - ETA: 98s (1.6min)
+      Progreso: 50/108 (46%) - 26 válidos - ETA: 90s (1.5min)
+      Progreso: 55/108 (50%) - 30 válidos - ETA: 82s (1.4min)
+      Progreso: 60/108 (55%) - 30 válidos - ETA: 75s (1.3min)
+      Progreso: 65/108 (60%) - 35 válidos - ETA: 67s (1.1min)
+      Progreso: 70/108 (64%) - 36 válidos - ETA: 60s (1.0min)
+      Progreso: 75/108 (69%) - 39 válidos - ETA: 52s (0.9min)
+      Progreso: 80/108 (74%) - 42 válidos - ETA: 44s (0.7min)
+      Progreso: 85/108 (78%) - 43 válidos - ETA: 36s (0.6min)
+      Progreso: 90/108 (83%) - 48 válidos - ETA: 28s (0.5min)
+      Progreso: 95/108 (87%) - 48 válidos - ETA: 20s (0.3min)
+      Progreso: 100/108 (92%) - 52 válidos - ETA: 12s (0.2min)
+      Progreso: 105/108 (97%) - 54 válidos - ETA: 5s (0.1min)
+      Progreso: 108/108 (100%) - 54 válidos - ETA: 0s (0.0min)
+    [SWEEP] Completado en 169s: 54 combinaciones superan el filtro de 15 trades.
+  Sweep completado: 54 resultados.
+  Clasificando trades por régimen de entrada ...
+  Clasificación completada.
+  ✅ BTC-USD @ 1d procesado correctamente.
+
+========================================================================
+  CONSTRUYENDO RESUMEN MULTI-ACTIVO ...
+========================================================================
+
+  Resumen Multi-Activo:
+  Asset Timeframe  HMM_States  Best_Sharpe  Net_Profit  Profit_Factor  Num_Trades  CAGR  Max_DD  Win_Rate
+BTC-USD        1d           4        0.897    566378.0          6.061          25 17.57  -12.95      80.0
+
+  Calculando equity combinada ...
+  Equity combinada: 4281 periodos.
+  Analizando especialista vs universalista ...
+  Asset Timeframe  regime_sharpe_dispersion  mean_regime_sharpe  num_regimes          type
+BTC-USD        1d              1.110223e-16            0.896842            3 UNIVERSALISTA
+  [WARN] No se pudo caracterizar regimenes para BTC-USD @ 1d: 'HMMResult' object has no attribute 'hmm_summary'
+
+========================================================================
+  EXPORTANDO DASHBOARD ...
+========================================================================
+
+  [DASHBOARD] Generando tradinglatino_hmm_dashboard.html ...
+  [DASHBOARD] Exportado a: tradinglatino_hmm_dashboard.html (1,756,432 bytes).
+
+========================================================================
+  ⚠️  ADVERTENCIA OBLIGATORIA
+========================================================================
+
+  Este análisis es in-sample y susceptible a sobreoptimización.
+  NO debe usarse para operar directamente.
+
+  El uso más correcto del HMM aquí es clasificar entornos de
+  mercado y evaluar si la estrategia se comporta como universalista
+  o especialista, para tomar decisiones a nivel de portfolio,
+  activación/desactivación y sizing de estrategias, NO para asumir
+  que optimizar parámetros por régimen generará ventaja robusta
+  fuera de muestra.
+    
+========================================================================
+  ✅ Dashboard generado correctamente.
+========================================================================
+SUCCESS

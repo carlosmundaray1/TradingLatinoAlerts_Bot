@@ -97,8 +97,37 @@ TAKE_PROFIT_PCT: Dict[str, float] = {
 TRAILING_STOP_PCT: Dict[str, float] = {
     "1h": 2.0,    # Optimo multi-objetivo: WR 73.5% | PF 3.48 | Sharpe 13.48
     "4h": 2.0,    # Optimo multi-objetivo: WR 73.2% | PF 5.55 | Sharpe 10.65
-    "1d": 1.0,    # Optimo multi-objetivo: WR 79.5% | PF 16.26 | Sharpe 13.43
-    "1wk": 1.0,   # Optimo multi-objetivo: WR 96.8% | PF ∞ | Sharpe 7.95
+    "1d": 1.0,    # Optimizado
+    "1wk": 1.0,   # Optimizado
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PARAMETROS OPTIMIZADOS POR TIMEFRAME (Grid Search Multi-Objetivo)
+# ──────────────────────────────────────────────────────────────────────────────
+# Resultados en BTC-USD (Junio 2026):
+#   TF    Thresh  Cons  Trail%  TP%   BaseWR  CombWR  Senales
+#   ---   ------  ----  ------  ---   ------  ------  -------
+#   1H      70      2    2.0    0.5   76.1%   78.3%    456
+#   4H      75      3    0.5    1.2   76.3%   77.5%    173
+#   1D      65      2    1.0    2.0   78.5%   80.4%    316
+#   1WK     65      2    1.0    2.0   97.2%   97.2%     72
+TRAILING_STOP_PCT_OPT: Dict[str, float] = {
+    "1h": 2.0,    # Retroceso 2.0% desde maximo
+    "4h": 0.5,    # Retroceso 0.5% desde maximo (tight)
+    "1d": 1.0,
+    "1wk": 1.0,
+}
+SIGNAL_THRESHOLDS: Dict[str, int] = {
+    "1h": 70,
+    "4h": 75,
+    "1d": 65,
+    "1wk": 65,
+}
+MIN_CONSECUTIVE_BY_TF: Dict[str, int] = {
+    "1h": 2,
+    "4h": 3,
+    "1d": 2,
+    "1wk": 2,
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -199,7 +228,7 @@ PERIOD_1W: str = "4y"
 # Si no ocurre, la premisa se invalida y el trade se cierra por expiración.
 MAX_BARS_BY_TF: Dict[str, int] = {
     "1h": 14,   # ~14 horas
-    "4h": 12,   # ~48 horas
+    "4h": 14,   # ~56 horas (optimizado por experiencia del usuario)
     "1d": 14,   # ~14 días
     "1wk": 12,  # ~3 meses
 }
@@ -5288,6 +5317,14 @@ def main():
             df = compute_all_indicators(df)
             print(f"  Indicadores calculados ({time.time()-t0:.1f}s)")
 
+            # -- Re-aplicar threshold y consecutive bars optimizados por timeframe --
+            tf_th = SIGNAL_THRESHOLDS.get(tf, SIGNAL_SCORE_THRESHOLD)
+            tf_cons = MIN_CONSECUTIVE_BY_TF.get(tf, MIN_CONSECUTIVE_BARS)
+            df["signal_raw_long"] = df["signal_score_long"] >= tf_th
+            df["signal_raw_short"] = df["signal_score_short"] >= tf_th
+            df["signal_long"] = _consecutive_bars_filter(df["signal_raw_long"], tf_cons)
+            df["signal_short"] = _consecutive_bars_filter(df["signal_raw_short"], tf_cons)
+
             # 3) HMM - features + entrenamiento
             t0 = time.time()
             features_df = build_hmm_features(df)
@@ -5323,9 +5360,9 @@ def main():
             else:
                 print(f"  VERIFICACION: Sin senales en el periodo")
 
-            # -- TRAILING STOP VERIFICATION --
+            # -- TRAILING STOP VERIFICATION (usa valores optimizados por TF) --
             trailing_verification = verify_with_trailing_stop(
-                df, tf, TRAILING_STOP_PCT.get(tf, 50.0)
+                df, tf, TRAILING_STOP_PCT_OPT.get(tf, TRAILING_STOP_PCT.get(tf, 50.0))
             )
             if trailing_verification and trailing_verification["total_signals"] > 0:
                 print(f"  TRAILING: "

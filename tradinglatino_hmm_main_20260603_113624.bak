@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+MAIN · TradingLatino HMM Regime Dashboard
+================================================================================
+Punto de entrada principal. Orquesta la descarga de datos, cálculo de
+indicadores, HMM, señales y generación del dashboard HTML.
+Uso:
+    python tradinglatino_hmm/main.py
+    python tradinglatino_hmm/main.py --asset ETH-USD
+================================================================================
+"""
+import json
+import os
+import sys
+import warnings
+import webbrowser
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+# ── Asegurar que la carpeta del proyecto está en sys.path ──
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from tradinglatino_hmm.config import (
+    ASSET, TIMEFRAMES, OUTPUT_HTML, STATE_FILE, OPEN_BROWSER, SIGNAL_LABELS,
+)
+from tradinglatino_hmm.data_loader import load_data
+from tradinglatino_hmm.indicators import compute_all_indicators
+from tradinglatino_hmm.hmm_model import build_hmm_features, fit_hmm
+from tradinglatino_hmm.signals import (
+    compute_signal, verify_signals_historically, verify_with_trailing_stop,
+)
+from tradinglatino_hmm.dashboard import (
+    TimeframeData, _detect_regime_changes, build_multi_tf_dashboard,
+)
+from tradinglatino_hmm.config import TRAILING_STOP_PCT
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BACKUP AUTOMÁTICO (preservado del original)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _auto_backup(max_backups: int = 10) -> None:
+    """Crea un backup automatico del script con timestamp."""
+    import shutil
+    import datetime
+    import glob
+
+    script_path = __file__ if __name__ != '__main__' else sys.argv[0]
+    if not script_path or script_path == '':
+        script_path = 'tradinglatino_hmm/main.py'
+
+    date = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_name = f'tradinglatino_hmm_main_{date}.bak'
+
+    try:
+        shutil.copy2(script_path, backup_name)
+        print(f"  [BACKUP] Creado: {backup_name}")
+    except Exception as e:
+        print(f"  [BACKUP] Error al crear backup: {e}")
+        return
+
+    # Limpiar backups viejos (mantener solo los ultimos N)
+    try:
+        backups = sorted(glob.glob('tradinglatino_hmm_main_*.bak'))
+        while len(backups) > max_backups:
+            old = backups.pop(0)
+            os.remove(old)
+            print(f"  [BACKUP] Eliminado backup antiguo: {old}")
+    except Exception:
+        pass
+
+    # También hacer backup del archivo original si existe
+    try:
+        orig_backups = sorted(glob.glob('tradinglatino_hmm_clean_*.bak'))
+        if len(orig_backups) > 0 and os.path.exists('tradinglatino_hmm_clean.py'):
+            shutil.copy2('tradinglatino_hmm_clean.py', f'tradinglatino_hmm_clean_{date}.bak')
+            print(f"  [BACKUP] Backup del original creado: tradinglatino_hmm_clean_{date}.bak")
+            # Limpiar backups del original
+            orig_backups = sorted(glob.glob('tradinglatino_hmm_clean_*.bak'))
+            while len(orig_backups) > max_backups:
+                old = orig_backups.pop(0)
+                os.remove(old)
+    except Exception:
+        pass
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def main() -> None:
+    """Punto de entrada principal del dashboard."""
+    _auto_backup()
+
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    print("=" * 60)
+    print("  TRADINGLATINO · HMM REGIME DASHBOARD")
+    print("=" * 60)
+
+    results: Dict[str, TimeframeData] = {}
+
+    for tf in TIMEFRAMES:
+        print(f"\n{'─' * 50}")
+        print(f"  TIMEFRAME: {tf}")
+        print(f"{'─' * 50}")
+
+        # Cargar datos
+        df = load_data(ASSET, tf)
+        if df is None or len(df) < 50:
+            print(f"  SKIP: Datos insuficientes para {tf}.")
+            continue
+
+        # Calcular indicadores
+        print(f"  Calculando indicadores...")
+        df = compute_all_indicators(df)
+
+        # HMM Features + Fit
+        print(f"  Construyendo features para HMM...")
+        features = build_hmm_features(df)
+        print(f"  Ajustando HMM...")
+        model, states, state_summary, bic_df, trans_mat = fit_hmm(features)
+
+        if model is None or len(states) == 0:
+            print(f"  SKIP: HMM falló para {tf}.")
+            continue
+
+        # Asignar régimen al DataFrame
+        df = df.iloc[:len(states)].copy()
+        df["regime"] = states
+
+        # Señal actual
+        signal_info = compute_signal(df, timeframe=tf)
+        print(f"  Señal: {SIGNAL_LABELS.get(signal_info['signal'], signal_info['signal'])}")
+
+        # Detectar cambios de régimen
+        regime_changes = _detect_regime_changes(states, df.index, state_summary)
+
+        # Verificación histórica
+        print(f"  Verificando señales históricamente...")
+        verification = verify_signals_historically(df, tf)
+
+        # Trailing stop verification
+        trail_pct = TRAILING_STOP_PCT.get(tf, 50.0)
+        trailing_verification = verify_with_trailing_stop(df, tf, trail_pct)
+
+        # Almacenar resultados
+        results[tf] = TimeframeData(
+            df_full=df,
+            states_full=states,
+            state_summary=state_summary,
+            trans_mat=trans_mat,
+            signal_info=signal_info,
+            regime_changes=regime_changes,
+            verification=verification,
+            trailing_verification=trailing_verification,
+        )
+
+    if not results:
+        print("\n  ERROR: No se pudieron procesar temporalidades.")
+        return
+
+    # Generar dashboard
+    print(f"\n{'─' * 50}")
+    print(f"  Generando dashboard HTML...")
+    html = build_multi_tf_dashboard(results, ASSET)
+
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  Dashboard guardado: {OUTPUT_HTML}")
+
+    # ── Alertas automáticas (comparar con estado anterior) ──
+    print(f"\n{'─' * 50}")
+    print(f"  ANALISIS DE ALERTAS")
+    print(f"{'─' * 50}")
+
+    alerts: List[str] = []
+    prev_state: Dict[str, Any] = {}
+
+    # Cargar estado anterior
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                prev_state = json.load(f)
+        except Exception:
+            prev_state = {}
+
+    current_state: Dict[str, Any] = {}
+
+    for tf, data in results.items():
+        signal = data.signal_info["signal"]
+        price = data.signal_info["price"]
+        prev_signal = prev_state.get(f"{tf}_signal", "FLAT")
+        prev_price = prev_state.get(f"{tf}_price", price)
+
+        # Detectar SOPORTE de BTC (para BTC-USD)
+        if ASSET == "BTC-USD" and tf == "1d":
+            if price < 50000:
+                alerts.append(f"⚠️ BTC-USD 1D por debajo de 50,000: ${price:,.0f}")
+            elif price < 55000:
+                alerts.append(f"⚠️ BTC-USD 1D cerca de soporte 55,000: ${price:,.0f}")
+
+        # Cambios de señal
+        if prev_signal != signal and signal in ("LONG", "SHORT"):
+            pct_change = ((price - prev_price) / prev_price * 100) if prev_price != price else 0
+            direction = "🟢" if signal == "LONG" else "🔴"
+            alerts.append(f"{direction} {ASSET} {tf}: {prev_signal} → {signal} "
+                         f"(Precio: ${price:,.0f}, Cambio: {pct_change:+.2f}%)")
+
+        # Guardar estado actual
+        current_state[f"{tf}_signal"] = signal
+        current_state[f"{tf}_price"] = price
+
+    # Mostrar alertas
+    if alerts:
+        for alert in alerts:
+            print(f"  ⚡ {alert}")
+    else:
+        print(f"  ✅ Sin alertas nuevas.")
+
+    # Guardar estado actual
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(current_state, f, indent=2)
+    except Exception:
+        pass
+
+    # Abrir navegador
+    if OPEN_BROWSER:
+        try:
+            webbrowser.open(f"file://{os.path.abspath(OUTPUT_HTML)}")
+            print(f"\n  🌐 Dashboard abierto en el navegador.")
+        except Exception:
+            print(f"\n  📁 Abre manualmente: {OUTPUT_HTML}")
+
+    print(f"\n{'=' * 60}")
+    print(f"  COMPLETADO")
+    print(f"{'=' * 60}")
+
+
+if __name__ == "__main__":
+    # Procesar argumentos CLI
+    if "--asset" in sys.argv:
+        idx = sys.argv.index("--asset")
+        if idx + 1 < len(sys.argv):
+            import tradinglatino_hmm.config as _config
+            _config.ASSET = sys.argv[idx + 1]
+
+    main()

@@ -1,0 +1,46 @@
+======================================================================
+  SIMULACIÓN · VALIDACIÓN DE ALERTAS DE CAMBIO DE TENDENCIA
+======================================================================
+  Activo: BTC-USD
+  Timeframes: ['1d', '1wk']
+  Períodos: {"1d": "5y", "1wk": "10y"}
+
+------------------------------------------------------------
+  TIMEFRAME: 1d
+------------------------------------------------------------
+  Descargando datos (5y)...
+  1825 velas cargadas (10-06-2021 → 08-06-2026).
+  Calculando indicadores...
+  Construyendo features y ajustando HMM...
+  Señal actual: FLAT (fuerza: 0%)
+  Cambios de régimen detectados: 239
+  Cambios de señal: 158
+  ✅ Detectados correctamente: 63/158 (39.9%)
+  ❌ Falsos positivos (régimen sin señal): 176
+  ⚠️  Falsos negativos (señal sin régimen): 95
+  📐 Antelación promedio: 1.6 velas
+  🎯 Dirección correcta: 15/63
+  📊 WR Global: 82.6% (373 señales)
+      LONG: 83.5% WR (224 señales, ret +1.66%)
+      SHORT: 81.2% WR (149 señales, ret -0.67%)
+------------------------------------------------------------
+  TIMEFRAME: 1wk
+------------------------------------------------------------
+  Descargando datos (10y)...
+  522 velas cargadas (06-06-2016 → 01-06-2026).
+  Calculando indicadores...
+  Construyendo features y ajustando HMM...
+  Señal actual: FLAT (fuerza: 0%)
+  Cambios de régimen detectados: 43
+  Cambios de señal: 42
+  ✅ Detectados correctamente: 17/42 (40.5%)
+  ❌ Falsos positivos (régimen sin señal): 26
+  ⚠️  Falsos negativos (señal sin régimen): 25
+  📐 Antelación promedio: 2.8 velas
+  🎯 Dirección correcta: 7/17
+  📊 WR Global: 96.0% (149 señales)
+      LONG: 96.0% WR (126 señales, ret +37.22%)
+      SHORT: 95.7% WR (23 señales, ret -15.17%)
+============================================================
+  Generando reporte HTML...
+  Reporte guardado: simulacion_alertas_BTC-USD.html
