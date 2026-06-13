@@ -1,0 +1,42 @@
+name: TradingLatino HMM Bot 24/7
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      assets:
+        description: 'Assets a procesar (separados por espacio)'
+        required: false
+        default: 'BTC-USD ETH-USD XRP-USD SOL-USD'
+
+env:
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  ENABLE_TELEGRAM: "true"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        asset: [BTC-USD, ETH-USD, XRP-USD, SOL-USD]
+      fail-fast: false
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy plotly hmmlearn yfinance requests
+
+      - name: Run HMM bot for ${{ matrix.asset }}
+        run: python tradinglatino_hmm_clean_v2.py --asset ${{ matrix.asset }} --headless
+        timeout-minutes: 15
