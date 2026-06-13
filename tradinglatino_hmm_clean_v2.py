@@ -5470,26 +5470,24 @@ def main():
     os.makedirs(os.path.dirname(state_file_path), exist_ok=True)
     with open(state_file_path, "w") as sf:
         json.dump(current_state, sf)
+    print(f"\n[DEBUG] ENABLE_TELEGRAM={ENABLE_TELEGRAM} TOKEN={'OK' if TELEGRAM_BOT_TOKEN else 'VACIO'} CHAT={'OK' if TELEGRAM_CHAT_ID else 'VACIO'} ALERTAS={len(alertas)}")
     if alertas:
-        print(f"\n{'='*60}")
-        print(">>> ALERTAS DEL SISTEMA <<<")
-        print(f"\n{'='*60}")
         for a in alertas:
             try:
                 print(f"  {a}")
             except UnicodeEncodeError:
-                # Eliminar emojis si la terminal no los soporta
                 clean = a.encode('ascii', 'ignore').decode('ascii')
                 print(f"  {clean}")
-
-
-        # Enviar alertas por Telegram si esta configurado
         if ENABLE_TELEGRAM:
             sent = _send_telegram_alerts_batch(ASSET, alertas)
             if sent:
                 print(f"  [Telegram] Alertas enviadas ({len(alertas)} alertas)")
-        print(f"\n{'='*60}")
+            else:
+                print(f"  [Telegram] Fallo al enviar alertas")
     print(f"\n{'='*60}")
+    if ENABLE_TELEGRAM and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        _send_telegram_alert(f"\U0001f916 <b>TradingLatino HMM - {ASSET}</b>\n{chr(61) * 20}\n\U0001f7e2 Bot activo\n\U000023f3 Proxima ejecucion en 2h\n{chr(61) * 20}\n<i>Enviado por TradingLatino HMM Bot</i>")
+        print(f"  [Telegram] Heartbeat enviado")
     if OPEN_BROWSER:
         print("Abriendo en el navegador...")
         webbrowser.open(str(output_path.resolve()))
