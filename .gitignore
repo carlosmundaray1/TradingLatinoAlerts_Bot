@@ -1,0 +1,34 @@
+# State files (cached in GitHub Actions)
+.hmm_state_*.json
+
+# Generated HTML dashboards
+hmm_dashboard_*.html
+simulacion_alertas_*.html
+hmm_regime_dashboard.html
+
+# Backups
+tradinglatino_hmm_clean_*.bak
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Temp files
+*.tmp
+*~
+*.log
+
+# OS files
+desktop.ini
+Thumbs.db
+
+# Environment
+.env
+
+# Windows reserved device name
+nul

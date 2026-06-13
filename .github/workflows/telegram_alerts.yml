@@ -1,0 +1,76 @@
+name: 🤖 Alertas Telegram - TradingLatino HMM
+
+on:
+  schedule:
+    # Cada 2 horas (minuto 0 de cada hora par)
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      asset:
+        description: 'Activo a monitorear'
+        required: true
+        default: 'BTC-USD'
+        type: choice
+        options:
+          - BTC-USD
+          - XRP-USD
+          - ETH-USD
+          - SOL-USD
+          - ADA-USD
+
+env:
+  ASSET: ${{ github.event.inputs.asset || 'BTC-USD' }}
+
+jobs:
+  check-signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 📦 Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🔄 Restaurar estado anterior
+        uses: actions/cache@v4
+        id: state-cache
+        with:
+          path: .hmm_state_${{ env.ASSET }}.json
+          key: hmm-state-${{ env.ASSET }}-${{ github.run_id }}
+          restore-keys: |
+            hmm-state-${{ env.ASSET }}-
+
+      - name: 📊 Ejecutar análisis HMM
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Evita error de webbrowser en entorno sin display
+          BROWSER: /bin/true
+        run: |
+          echo "=== Analizando ${{ env.ASSET }} ==="
+          python tradinglatino_hmm_clean.py --asset ${{ env.ASSET }}
+
+      - name: 💾 Guardar estado para próxima ejecución
+        if: always()
+        uses: actions/cache@v4
+        with:
+          path: .hmm_state_${{ env.ASSET }}.json
+          key: hmm-state-${{ env.ASSET }}-${{ github.run_id }}
+
+      - name: 📋 Resumen
+        if: always()
+        run: |
+          echo "=== Resumen de ejecución ==="
+          echo "Activo: ${{ env.ASSET }}"
+          echo "Estado cache: ${{ steps.state-cache.outputs.cache-hit }}"
+          ls -la .hmm_state_*.json 2>/dev/null || echo "(sin archivo de estado)"

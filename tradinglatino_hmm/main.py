@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+MAIN · TradingLatino HMM Regime Dashboard
+================================================================================
+Punto de entrada principal. Orquesta la descarga de datos, cálculo de
+indicadores, HMM, señales y generación del dashboard HTML.
+Uso:
+    python tradinglatino_hmm/main.py
+    python tradinglatino_hmm/main.py --asset ETH-USD
+================================================================================
+"""
+import json
+import os
+import sys
+import warnings
+import webbrowser
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+# ── Asegurar que la carpeta del proyecto está en sys.path ──
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from tradinglatino_hmm.config import (
+    ASSET, TIMEFRAMES, OUTPUT_HTML, STATE_FILE, OPEN_BROWSER, SIGNAL_LABELS,
+)
+from tradinglatino_hmm.data_loader import load_data
+from tradinglatino_hmm.indicators import compute_all_indicators
+from tradinglatino_hmm.hmm_model import build_hmm_features, fit_hmm
+from tradinglatino_hmm.signals import (
+    compute_signal, verify_signals_historically, verify_with_trailing_stop,
+)
+from tradinglatino_hmm.dashboard import (
+    TimeframeData, _detect_regime_changes, build_multi_tf_dashboard,
+)
+from tradinglatino_hmm.config import TRAILING_STOP_PCT
+
+# ── TELEGRAM ALERTS ──
+ENABLE_TELEGRAM: bool = os.environ.get("ENABLE_TELEGRAM", "true").lower() in ("true", "1", "yes")  # Desde env var ENABLE_TELEGRAM
+TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "8942505010:AAGM9ziP38U3flYxPzR11gnVGwkuDz9o4KQ")  # Desde env var TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID: str = os.environ.get("TELEGRAM_CHAT_ID", "536876820")  # Chat ID desde env var TELEGRAM_CHAT_ID
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BACKUP AUTOMÁTICO (preservado del original)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _auto_backup(max_backups: int = 10) -> None:
+    """Crea un backup automatico del script con timestamp."""
+    import shutil
+    import datetime
+    import glob
+
+    script_path = __file__ if __name__ != '__main__' else sys.argv[0]
+    if not script_path or script_path == '':
+        script_path = 'tradinglatino_hmm/main.py'
+
+    date = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_name = f'tradinglatino_hmm_main_{date}.bak'
+
+    try:
+        shutil.copy2(script_path, backup_name)
+        print(f"  [BACKUP] Creado: {backup_name}")
+    except Exception as e:
+        print(f"  [BACKUP] Error al crear backup: {e}")
+        return
+
+    # Limpiar backups viejos (mantener solo los ultimos N)
+    try:
+        backups = sorted(glob.glob('tradinglatino_hmm_main_*.bak'))
+        while len(backups) > max_backups:
+            old = backups.pop(0)
+            os.remove(old)
+            print(f"  [BACKUP] Eliminado backup antiguo: {old}")
+    except Exception:
+        pass
+
+    # También hacer backup del archivo original si existe
+    try:
+        orig_backups = sorted(glob.glob('tradinglatino_hmm_clean_*.bak'))
+        if len(orig_backups) > 0 and os.path.exists('tradinglatino_hmm_clean.py'):
+            shutil.copy2('tradinglatino_hmm_clean.py', f'tradinglatino_hmm_clean_{date}.bak')
+            print(f"  [BACKUP] Backup del original creado: tradinglatino_hmm_clean_{date}.bak")
+            # Limpiar backups del original
+            orig_backups = sorted(glob.glob('tradinglatino_hmm_clean_*.bak'))
+            while len(orig_backups) > max_backups:
+                old = orig_backups.pop(0)
+                os.remove(old)
+    except Exception:
+        pass
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TELEGRAM ALERTS
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _send_telegram_alert(message: str) -> bool:
+    """Envia una alerta por Telegram.
+    Retorna True si se envio correctamente, False si fallo.
+    """
+    if not ENABLE_TELEGRAM or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        import requests as _req
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        resp = _req.post(url, json=payload, timeout=10)
+        if resp.status_code == 200 and resp.json().get("ok"):
+            return True
+        else:
+            print(f"  [Telegram] Error: {resp.json().get('description', 'desconocido')}")
+            return False
+    except ImportError:
+        print("  [Telegram] requests no instalado. pip install requests")
+        return False
+    except Exception as e:
+        print(f"  [Telegram] Error de conexion: {e}")
+        return False
+
+
+def _build_telegram_message(asset: str, alerts: list) -> str:
+    """Construye un mensaje formateado para Telegram con todas las alertas multi-timeframe."""
+    lines = [
+        f"<b> TradingLatino HMM - {asset}</b>",
+        f"{chr(45) * 30}",
+    ]
+    if alerts:
+        lines.append("<b> Alertas Detectadas:</b>")
+        for a in alerts:
+            lines.append(a)
+    else:
+        lines.append(" Sin alertas nuevas.")
+    lines.append(f"{chr(45) * 30}")
+    lines.append("<i>Enviado por TradingLatino HMM Bot</i>")
+    return "\n".join(lines)
+
+
+def _send_telegram_alerts_batch(asset: str, alerts: list) -> bool:
+    """Envia todas las alertas en un solo mensaje de Telegram."""
+    if not ENABLE_TELEGRAM or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    if not alerts:
+        return False
+    message = _build_telegram_message(asset, alerts)
+    return _send_telegram_alert(message)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _safe_print(text: str) -> None:
+    """Imprime texto en consola, evitando UnicodeEncodeError en Windows."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Reemplazar caracteres no imprimibles en cp1252
+        safe = text.encode('ascii', errors='replace').decode('ascii')
+        print(safe)
+
+
+def main() -> None:
+    """Punto de entrada principal del dashboard."""
+    _auto_backup()
+
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    _safe_print("=" * 60)
+    _safe_print("  TRADINGLATINO . HMM REGIME DASHBOARD")
+    _safe_print("=" * 60)
+
+    results: Dict[str, TimeframeData] = {}
+
+    for tf in TIMEFRAMES:
+        _safe_print(f"\n{'-' * 50}")
+        _safe_print(f"  TIMEFRAME: {tf}")
+        _safe_print(f"{'-' * 50}")
+
+        # Cargar datos
+        df = load_data(ASSET, tf)
+        if df is None or len(df) < 50:
+            _safe_print(f"  SKIP: Datos insuficientes para {tf}.")
+            continue
+
+        # Calcular indicadores
+        _safe_print(f"  Calculando indicadores...")
+        df = compute_all_indicators(df)
+
+        # HMM Features + Fit
+        _safe_print(f"  Construyendo features para HMM...")
+        features = build_hmm_features(df)
+        _safe_print(f"  Ajustando HMM...")
+        model, states, state_summary, bic_df, trans_mat = fit_hmm(features)
+
+        if model is None or len(states) == 0:
+            _safe_print(f"  SKIP: HMM fallo para {tf}.")
+            continue
+
+        # Asignar regimen al DataFrame
+        df = df.iloc[:len(states)].copy()
+        df["regime"] = states
+
+        # Senal actual
+        signal_info = compute_signal(df, timeframe=tf)
+        _safe_print(f"  Senal: {SIGNAL_LABELS.get(signal_info['signal'], signal_info['signal'])}")
+
+        # Detectar cambios de regimen
+        regime_changes = _detect_regime_changes(states, df.index, state_summary)
+
+        # Verificacion historica
+        _safe_print(f"  Verificando senales historicamente...")
+        verification = verify_signals_historically(df, tf)
+
+        # Trailing stop verification
+        trail_pct = TRAILING_STOP_PCT.get(tf, 50.0)
+        trailing_verification = verify_with_trailing_stop(df, tf, trail_pct)
+
+        # Almacenar resultados
+        results[tf] = TimeframeData(
+            df_full=df,
+            states_full=states,
+            state_summary=state_summary,
+            trans_mat=trans_mat,
+            signal_info=signal_info,
+            regime_changes=regime_changes,
+            verification=verification,
+            trailing_verification=trailing_verification,
+        )
+
+    if not results:
+        _safe_print("\n  ERROR: No se pudieron procesar temporalidades.")
+        return
+
+    # Generar dashboard
+    _safe_print(f"\n{'-' * 50}")
+    _safe_print(f"  Generando dashboard HTML...")
+    html = build_multi_tf_dashboard(results, ASSET)
+
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(html)
+    _safe_print(f"  Dashboard guardado: {OUTPUT_HTML}")
+
+    # ── Alertas automaticas (comparar con estado anterior) ──
+    _safe_print(f"\n{'-' * 50}")
+    _safe_print(f"  ANALISIS DE ALERTAS")
+    _safe_print(f"{'-' * 50}")
+
+    alerts: List[str] = []
+    prev_state: Dict[str, Any] = {}
+
+    # Cargar estado anterior
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                prev_state = json.load(f)
+        except Exception:
+            prev_state = {}
+
+    current_state: Dict[str, Any] = {}
+
+    for tf, data in results.items():
+        signal = data.signal_info["signal"]
+        price = data.signal_info["price"]
+        prev_signal = prev_state.get(f"{tf}_signal", "FLAT")
+        prev_price = prev_state.get(f"{tf}_price", price)
+
+        # Detectar SOPORTE de BTC (para BTC-USD)
+        if ASSET == "BTC-USD" and tf == "1d":
+            if price < 50000:
+                alerts.append(f"[BTC] 1D por debajo de 50,000: ${price:,.0f}")
+            elif price < 55000:
+                alerts.append(f"[BTC] 1D cerca de soporte 55,000: ${price:,.0f}")
+
+        # Cambios de senal
+        if prev_signal != signal and signal in ("LONG", "SHORT"):
+            pct_change = ((price - prev_price) / prev_price * 100) if prev_price != price else 0
+            direction = "LONG" if signal == "LONG" else "SHORT"
+            alerts.append(f"[SENAL] {ASSET} {tf}: {prev_signal} -> {direction} "
+                         f"(Precio: ${price:,.0f}, Cambio: {pct_change:+.2f}%)")
+
+        # Guardar estado actual
+        current_state[f"{tf}_signal"] = signal
+        current_state[f"{tf}_price"] = price
+
+    # Mostrar alertas
+    if alerts:
+        for alert in alerts:
+            _safe_print(f"  ** {alert}")
+
+        # Enviar alertas por Telegram si esta configurado
+        if ENABLE_TELEGRAM:
+            _safe_print("  [Telegram] Enviando alertas...")
+            sent = _send_telegram_alerts_batch(ASSET, alerts)
+            if sent:
+                _safe_print(f"  [Telegram] Alertas enviadas correctamente ({len(alerts)} alertas)")
+            else:
+                _safe_print("  [Telegram] No se pudieron enviar las alertas (revisa token/chat_id)")
+    else:
+        _safe_print(f"  Sin alertas nuevas.")
+
+    # Guardar estado actual
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(current_state, f, indent=2)
+    except Exception:
+        pass
+
+    # Abrir navegador
+    if OPEN_BROWSER:
+        try:
+            webbrowser.open(f"file://{os.path.abspath(OUTPUT_HTML)}")
+            _safe_print(f"\n  Dashboard abierto en el navegador.")
+        except Exception:
+            _safe_print(f"\n  Abre manualmente: {OUTPUT_HTML}")
+
+    _safe_print(f"\n{'=' * 60}")
+    _safe_print(f"  COMPLETADO")
+    _safe_print(f"{'=' * 60}")
+
+
+if __name__ == "__main__":
+    # Procesar argumentos CLI
+    if "--asset" in sys.argv:
+        idx = sys.argv.index("--asset")
+        if idx + 1 < len(sys.argv):
+            import tradinglatino_hmm.config as _config
+            _config.ASSET = sys.argv[idx + 1]
+
+    main()
