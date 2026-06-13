@@ -5443,31 +5443,28 @@ def main():
         curr_price_val = current_state.get(f"{tf_key}_price", 0)
         curr_strength = current_state.get(f"{tf_key}_strength", 0)
         tf_label = tf_key.upper()
+
+        # Primera ejecucion: no hay estado previo -> enviar alerta si hay senal
+        if prev_sig == "N/A" and curr_sig in ("LONG", "SHORT"):
+            direction_emoji = "🟢" if curr_sig == "LONG" else "🔴"
+            msg = (f"{direction_emoji} {ASSET} [{tf_label}] SENAL INICIAL {curr_sig}!\n"
+            f"Precio: {_fmt_price(curr_price_val)}\n"
+            f"Fuerza: {curr_strength}%")
+            alertas.append(msg)
         
         # Cambio a LONG
-        if curr_sig == "LONG" and prev_sig != "LONG" and prev_sig != "N/A":
+        elif curr_sig == "LONG" and prev_sig not in ("LONG", "N/A"):
             msg = (f"🟢 {ASSET} [{tf_label}] CAMBIO a LONG!\n"
             f"Precio: {_fmt_price(curr_price_val)}\n"
             f"Fuerza: {curr_strength}%")
-
             alertas.append(msg)
         
         # Cambio a SHORT
-        if curr_sig == "SHORT" and prev_sig != "SHORT" and prev_sig != "N/A":
+        elif curr_sig == "SHORT" and prev_sig not in ("SHORT", "N/A"):
             msg = (f"🔴 {ASSET} [{tf_label}] CAMBIO a SHORT!\n"
             f"Precio: {_fmt_price(curr_price_val)}\n"
             f"Fuerza: {curr_strength}%")
-
             alertas.append(msg)
-        
-        # Cambio de FLAT a senal
-        if curr_sig in ("LONG", "SHORT") and prev_sig == "FLAT":
-            direction_emoji = "🟢" if curr_sig == "LONG" else "🔴"
-            msg = (f"{direction_emoji} {ASSET} [{tf_label}] NUEVA SENAL {curr_sig}!\n"
-            f"Precio: {_fmt_price(curr_price_val)}\n"
-            f"Fuerza: {curr_strength}%")
-            if msg not in alertas:
-                alertas.append(msg)
     
     # Guardar estado actual para la proxima ejecucion
     os.makedirs(os.path.dirname(state_file_path), exist_ok=True)
