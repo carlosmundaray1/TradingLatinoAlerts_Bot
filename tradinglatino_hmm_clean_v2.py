@@ -831,12 +831,13 @@ def build_hmm_features(df: pd.DataFrame) -> pd.DataFrame:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, pd.DataFrame, Optional[np.ndarray]]:
-    """Ajusta HMM probando varios estados, elige el mejor por BIC."""
+def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, pd.DataFrame, Optional[np.ndarray], Optional[np.ndarray]]:
+    """Ajusta HMM probando varios estados, elige el mejor por BIC.
+    Retorna: model, states, state_summary, bic_df, trans_mat, state_proba"""
     clean = features_df.dropna()
     if len(clean) < 100:
         print("  ERROR: Datos insuficientes para HMM.")
-        return None, np.array([]), pd.DataFrame(), pd.DataFrame(), np.array([])
+        return None, np.array([]), pd.DataFrame(), pd.DataFrame(), np.array([]), None
     X = clean.values
     means = np.nanmean(X, axis=0)
     stds = np.nanstd(X, axis=0)
@@ -845,14 +846,15 @@ def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, p
     best_bic = np.inf
     best_model = None
     best_states = None
+    best_proba = None
     bic_results = []
 
-    # Multiples semillas para evitar optimos locales
     HMM_SEEDS: List[int] = [42, 7, 123]
     for n_states in HMM_STATE_RANGE:
         best_model_n = None
         best_ll_n = -np.inf
         best_states_n = None
+        best_proba_n = None
         for seed in HMM_SEEDS:
             try:
                 model = hmm.GaussianHMM(
@@ -868,6 +870,7 @@ def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, p
                     best_ll_n = log_likelihood
                     best_model_n = model
                     best_states_n = model.predict(X_scaled).copy()
+                    best_proba_n = model.predict_proba(X_scaled).copy()
             except Exception as e:
                 print(f"    HMM {n_states} estados (seed={seed}) falló: {e}")
                 continue
@@ -875,7 +878,6 @@ def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, p
             print(f"    HMM {n_states} estados falló con todas las semillas.")
             continue
 
-        # BIC con el mejor modelo de este n_states
         k = n_states * X_scaled.shape[1] * 2 + n_states * (n_states - 1) + (n_states - 1)
         bic = -2 * best_ll_n + k * np.log(len(X_scaled))
         bic_results.append({"n_states": n_states, "bic": bic})
@@ -884,9 +886,10 @@ def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, p
             best_bic = bic
             best_model = best_model_n
             best_states = best_states_n.copy()
+            best_proba = best_proba_n.copy() if best_proba_n is not None else None
     if best_model is None:
         print("  ERROR: No se pudo ajustar HMM.")
-        return None, np.array([]), pd.DataFrame(), pd.DataFrame(), np.array([])
+        return None, np.array([]), pd.DataFrame(), pd.DataFrame(), np.array([]), None
     bic_df = pd.DataFrame(bic_results)
 
     # Reetiquetar por volatilidad
@@ -931,7 +934,12 @@ def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, p
         for k, l in relabel_map.items():
             reordered[j, l] = trans_mat[i, k]
     trans_mat = reordered
-    return best_model, best_states, state_summary, bic_df, trans_mat
+    if best_proba is not None:
+        reordered_proba = np.zeros_like(best_proba)
+        for old_col, new_col in relabel_map.items():
+            reordered_proba[:, new_col] = best_proba[:, old_col]
+        best_proba = reordered_proba
+    return best_model, best_states, state_summary, bic_df, trans_mat, best_proba
 
 
 def _describe_regime(state: int, vol: float, mean_ret: float) -> str:
@@ -1670,10 +1678,15 @@ def verify_signals_historically(df: pd.DataFrame, timeframe: str) -> Dict[str, A
             stats[side] = {
                 "num_signals": 0,
                 "win_rate": 0.0,
+                "wins": 0,
+                "losses": 0,
                 "avg_return": 0.0,
                 "avg_max_favorable": 0.0,
                 "avg_max_adverse": 0.0,
                 "avg_bars_to_win": None,
+                "recent_signals": 0,
+                "recent_wins": 0,
+                "recent_win_rate": None,
             }
             continue
         wins = sum(1 for r in results_list if r["won"])
@@ -1875,11 +1888,15 @@ def verify_with_trailing_stop(df: pd.DataFrame, timeframe: str, trail_pct: float
             stats[side] = {
                 "num_signals": 0,
                 "win_rate_tp": 0.0,
+                "wins_tp": 0,
                 "win_rate_ts": 0.0,
+                "wins_ts": 0,
                 "win_rate_combined": 0.0,
+                "wins_combined": 0,
                 "avg_return_tp": 0.0,
                 "avg_return_ts": 0.0,
                 "avg_return_combined": 0.0,
+                "trail_activated": 0,
                 "trail_activated_pct": 0.0,
             }
             continue
@@ -5329,15 +5346,35 @@ def main():
             # 3) HMM - features + entrenamiento
             t0 = time.time()
             features_df = build_hmm_features(df)
-            _, states, state_summary, _, trans_mat = fit_hmm(features_df)
+            _, states, state_summary, _, trans_mat, state_proba = fit_hmm(features_df)
             n_states = state_summary["state"].nunique()
             print(f"  HMM entrenado: {n_states} estados ({time.time()-t0:.1f}s)")
 
-            # -- FILTRO MAESTRO DE REGIMEN HMM (reemplaza la suma de pesos) --
-            # El regimen determina la direccion PERMITIDA:
-            #   alcista → solo LONG, bajista → solo SHORT, neutral → ambas
-            # Esto elimina falsos positivos en direccion contraria al mercado
+            # Asignar estados HMM al dataframe (bugfix: esto faltaba)
+            clean_idx = features_df.dropna().index
+            df["regime"] = np.nan
+            df.loc[clean_idx, "regime"] = states
+
+            # -- FILTRO MAESTRO DE REGIMEN HMM --
             df = apply_regime_filter(df, state_summary)
+
+            # -- Filtro de confianza del regimen (probabilidad HMM) --
+            REGIME_CONFIDENCE_MIN: float = 0.60
+            if state_proba is not None and len(state_proba) > 0 and len(states) > 0:
+                confidences = np.array([state_proba[i, int(states[i])] for i in range(len(states))])
+                df_regime_confidence = pd.Series(index=clean_idx, data=confidences, dtype=float)
+                df["regime_confidence"] = np.nan
+                df.loc[clean_idx, "regime_confidence"] = df_regime_confidence
+                low_conf_mask = df["regime_confidence"] < REGIME_CONFIDENCE_MIN
+                if low_conf_mask.any():
+                    n_blocked = low_conf_mask.sum()
+                    df.loc[low_conf_mask, "signal_long"] = False
+                    df.loc[low_conf_mask, "signal_short"] = False
+                    print(f"  [Confianza] {n_blocked} velas con regimen < 60% -> senales bloqueadas")
+                else:
+                    print(f"  [Confianza] Min: {confidences.min()*100:.0f}% | Max: {confidences.max()*100:.0f}%")
+            else:
+                print(f"  [Confianza] No disponible")
 
             # -- Detectar senales precursoras de cambios de tendencia --
             df = compute_precursor_signals(df)
