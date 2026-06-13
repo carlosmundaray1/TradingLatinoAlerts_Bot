@@ -35,6 +35,13 @@ jobs:
           pip install --upgrade pip
           pip install pandas numpy plotly hmmlearn yfinance requests
 
+      - name: Test Telegram API connection
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot8942505010:AAGM9ziP38U3flYxPzR11gnVGwkuDz9o4KQ/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d '{"chat_id":"536876820","text":"[GHA] Test connection from workflow","parse_mode":"HTML"}'
+        continue-on-error: true
+
       - name: Run HMM bot for ${{ matrix.asset }}
         run: python tradinglatino_hmm_clean_v2.py --asset ${{ matrix.asset }} --headless
         timeout-minutes: 15
