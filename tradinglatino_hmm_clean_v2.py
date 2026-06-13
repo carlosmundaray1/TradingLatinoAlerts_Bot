@@ -1238,27 +1238,29 @@ def _send_telegram_alert(message: str) -> bool:
     Retorna True si se envio correctamente, False si fallo o no esta configurado.
     """
     if not ENABLE_TELEGRAM or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print(f"  [Telegram] SKIP: ENABLE={ENABLE_TELEGRAM} TOKEN={bool(TELEGRAM_BOT_TOKEN)} CHAT={bool(TELEGRAM_CHAT_ID)}")
         return False
     try:
-        import requests as _req
+        import urllib.request as _ur
+        import json as _json
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
+        data = _json.dumps({
             "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
-        }
-        resp = _req.post(url, json=payload, timeout=10)
-        if resp.status_code == 200 and resp.json().get("ok"):
+        }).encode("utf-8")
+        req = _ur.Request(url, data=data, headers={"Content-Type": "application/json"})
+        resp = _ur.urlopen(req, timeout=15)
+        body = _json.loads(resp.read().decode("utf-8"))
+        if body.get("ok"):
+            print(f"  [Telegram] Enviado OK")
             return True
         else:
-            print(f"  [Telegram] Error: {resp.json().get('description', 'desconocido')}")
+            print(f"  [Telegram] Error API: {body.get('description', 'desconocido')}")
             return False
-    except ImportError:
-        print("  [Telegram] requests no instalado. pip install requests")
-        return False
     except Exception as e:
-        print(f"  [Telegram] Error de conexion: {e}")
+        print(f"  [Telegram] Error conexion: {e}")
         return False
 
 
