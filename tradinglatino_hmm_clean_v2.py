@@ -333,6 +333,12 @@ def _squeeze_momentum(high, low, close, bb_length=20, bb_std=2.0, kc_length=20, 
     diff = close - center                    # source - center
     smi_hist = _linreg(diff, kc_length)      # linreg(diff, KC, 0)
     smi_hist = smi_hist.fillna(0)
+    # Normalizar a % del precio para que el histograma del Squeeze se vea
+    # identico en forma y tamano en todas las temporalidades (1h, 4h, 1d, 1w).
+    # Sin esta normalizacion, 1d muestra montanas aplanadas porque el rango
+    # del SMI en dolares brutos es desproporcionado entre TFs.
+    smi_hist = smi_hist / close.replace(0, np.nan) * 100
+    smi_hist = smi_hist.fillna(0)
     return squeeze_on, squeeze_off, smi_hist, bb_upper, bb_mid, bb_lower, kc_upper, kc_mid, kc_lower
 
 def _rsi(series: pd.Series, length: int = 14) -> pd.Series:
@@ -834,6 +840,8 @@ def build_hmm_features(df: pd.DataFrame) -> pd.DataFrame:
 def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, pd.DataFrame, Optional[np.ndarray], Optional[np.ndarray]]:
     """Ajusta HMM probando varios estados, elige el mejor por BIC.
     Retorna: model, states, state_summary, bic_df, trans_mat, state_proba"""
+    import warnings, logging
+    logging.getLogger('hmmlearn').setLevel(logging.ERROR)
     clean = features_df.dropna()
     if len(clean) < 100:
         print("  ERROR: Datos insuficientes para HMM.")
@@ -861,10 +869,12 @@ def fit_hmm(features_df: pd.DataFrame) -> Tuple[Any, np.ndarray, pd.DataFrame, p
                     n_components=n_states,
                     covariance_type=HMM_COVARIANCE_TYPE,
                     random_state=seed,
-                    n_iter=300,
+                    n_iter=1000,
                     tol=1e-4,
                 )
-                model.fit(X_scaled)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    model.fit(X_scaled)
                 log_likelihood = model.score(X_scaled)
                 if log_likelihood > best_ll_n:
                     best_ll_n = log_likelihood
