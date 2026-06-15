@@ -177,6 +177,16 @@ PRECURSOR_THRESHOLD: int = 45  # Score minimo para activar alerta precursora
 PRECURSOR_VELOCITY_BARS: int = 5  # Ventana para calcular velocidad del score
 PRECURSOR_MIN_COMPONENTS: int = 4  # Componentes minimos activos para alerta
 
+# -- SISTEMA HIBRIDO FINAL: HMM + Precursores con Pesos --
+HYBRID_W_HMM: int = 30        # Peso del cambio de regimen HMM
+HYBRID_W_PRECURSOR: int = 35  # Peso del precursor de componentes
+HYBRID_W_VELOCITY: int = 20   # Peso de la velocidad del score hacia el threshold
+HYBRID_W_ALIGNMENT: int = 15  # Peso de la alineacion regimen-senal
+HYBRID_CONFIDENCE_THRESHOLD: int = 50  # Confianza minima (0-100) para activar alerta
+HYBRID_LOOKBACK: int = 3      # Ventana de deteccion (velas hacia atras)
+HYBRID_VELOCITY_THRESHOLD: float = 5.0  # Delta minimo de score para considerar velocidad
+
+
 # -- MEJORA 2B: Reduccion de threshold por tipo de regimen --
 REGIME_THRESHOLD_REDUCTION = {
     "EXPANSION ALCISTA": 15,   # Euforia: baja threshold 15 pts
@@ -1203,6 +1213,138 @@ def compute_precursor_signals(df: pd.DataFrame) -> pd.DataFrame:
             df.loc[df.index[i], "precursor_active"] = True
 
     return df
+
+# -- SISTEMA HIBRIDO FINAL: HMM + Precursores con Pesos --
+
+def compute_hybrid_alert(df: pd.DataFrame, states: np.ndarray, state_summary: pd.DataFrame) -> pd.DataFrame:
+    """
+    Sistema hibrido final que combina HMM + Precursores con pesos ponderados
+    para detectar cambios de tendencia LONG <-> SHORT.
+
+    Para cada vela calcula un score de confianza (0-100) basado en:
+      - HYBRID_W_HMM: Cambio de regimen HMM reciente con bias alineado
+      - HYBRID_W_PRECURSOR: Precursor de componentes activo en la misma direccion
+      - HYBRID_W_VELOCITY: Velocidad del signal score hacia el threshold
+      - HYBRID_W_ALIGNMENT: Regimen actual alineado con la direccion senalada
+
+    Columnas anadidas:
+      - hybrid_confidence_long/short: confianza 0-100
+      - hybrid_alert_long/short: alerta activa (booleano)
+      - hybrid_alert_active: True si alguna alerta activa
+    """
+    df["hybrid_confidence_long"] = 0.0
+    df["hybrid_confidence_short"] = 0.0
+    df["hybrid_alert_long"] = False
+    df["hybrid_alert_short"] = False
+    df["hybrid_alert_active"] = False
+    df["hybrid_debug"] = ""
+
+    # Mapa de bias por estado
+    state_bias_map = {}
+    for _, r in state_summary.iterrows():
+        state_bias_map[int(r["state"])] = _classify_regime_bias(r["description"])
+
+    # Detectar cambios de regimen
+    regime_changed = np.zeros(len(df), dtype=bool)
+    regime_new_bias = np.full(len(df), 'neutral', dtype=object)
+    for i in range(1, min(len(states), len(df))):
+        if states[i] != states[i-1]:
+            regime_changed[i] = True
+            regime_new_bias[i] = state_bias_map.get(int(states[i]), 'neutral')
+            # Marcar las siguientes velas como cambio reciente
+            lookahead = min(HYBRID_LOOKBACK, len(df) - i - 1)
+            for j in range(1, lookahead + 1):
+                regime_changed[i + j] = True
+                if regime_new_bias[i + j] == 'neutral':
+                    regime_new_bias[i + j] = state_bias_map.get(int(states[i]), 'neutral')
+
+    # Calcular componentes del score para cada vela
+    for i in range(len(df)):
+        debug_parts = []
+
+        # --- Componente 1: HMM Regime Change ---
+        hmm_score = 0
+        if regime_changed[i]:
+            nb = regime_new_bias[i]
+            if nb == "bullish":
+                hmm_score = HYBRID_W_HMM
+                debug_parts.append('HMM_ALCISTA+' + str(HYBRID_W_HMM))
+            elif nb == "bearish":
+                hmm_score = HYBRID_W_HMM
+                debug_parts.append('HMM_BAJISTA+' + str(HYBRID_W_HMM))
+            else:
+                hmm_score = HYBRID_W_HMM // 2
+                debug_parts.append('HMM_NEUTRAL+' + str(HYBRID_W_HMM // 2))
+
+        # --- Componente 2: Precursor activo ---
+        precursor_long_window = False
+        precursor_short_window = False
+        if "precursor_long" in df.columns:
+            lookback_start = max(0, i - HYBRID_LOOKBACK)
+            precursor_long_window = df["precursor_long"].iloc[lookback_start:i+1].any()
+            precursor_short_window = df["precursor_short"].iloc[lookback_start:i+1].any()
+
+        precursor_score_long = 0
+        precursor_score_short = 0
+        if precursor_long_window:
+            precursor_score_long = HYBRID_W_PRECURSOR
+            debug_parts.append('PREC_LONG+' + str(HYBRID_W_PRECURSOR))
+        if precursor_short_window:
+            precursor_score_short = HYBRID_W_PRECURSOR
+            debug_parts.append('PREC_SHORT+' + str(HYBRID_W_PRECURSOR))
+
+        # --- Componente 3: Velocity del signal score ---
+        velocity_long = 0.0
+        velocity_short = 0.0
+        if "signal_score_long" in df.columns and i > 0:
+            delta_l = float(df["signal_score_long"].iloc[i]) - float(df["signal_score_long"].iloc[i-1])
+            if delta_l > HYBRID_VELOCITY_THRESHOLD:
+                velocity_long = delta_l
+            delta_s = float(df["signal_score_short"].iloc[i]) - float(df["signal_score_short"].iloc[i-1])
+            if delta_s > HYBRID_VELOCITY_THRESHOLD:
+                velocity_short = delta_s
+
+        velocity_score_long = min(HYBRID_W_VELOCITY, int(HYBRID_W_VELOCITY * (velocity_long / 10.0))) if velocity_long > 0 else 0
+        velocity_score_short = min(HYBRID_W_VELOCITY, int(HYBRID_W_VELOCITY * (velocity_short / 10.0))) if velocity_short > 0 else 0
+        if velocity_score_long > 0:
+            debug_parts.append('VEL_LONG+' + str(velocity_score_long))
+        if velocity_score_short > 0:
+            debug_parts.append('VEL_SHORT+' + str(velocity_score_short))
+
+        # --- Componente 4: Alignment regimen-senal ---
+        alignment_score_long = 0
+        alignment_score_short = 0
+        if "regime" in df.columns:
+            current_state = int(df["regime"].iloc[i]) if "regime" in df.columns else -1
+            current_bias = state_bias_map.get(current_state, 'neutral')
+            if current_bias == "bullish":
+                alignment_score_long = HYBRID_W_ALIGNMENT
+                debug_parts.append('ALIGN_LONG+' + str(HYBRID_W_ALIGNMENT))
+            elif current_bias == "bearish":
+                alignment_score_short = HYBRID_W_ALIGNMENT
+                debug_parts.append('ALIGN_SHORT+' + str(HYBRID_W_ALIGNMENT))
+
+        # --- Confianza total ---
+        nb = regime_new_bias[i]
+        hmm_contrib_long = hmm_score if nb in ("bullish", "neutral") else 0
+        hmm_contrib_short = hmm_score if nb in ("bearish", "neutral") else 0
+
+        conf_long = hmm_contrib_long + precursor_score_long + velocity_score_long + alignment_score_long
+        conf_short = hmm_contrib_short + precursor_score_short + velocity_score_short + alignment_score_short
+
+        conf_long = min(100, conf_long)
+        conf_short = min(100, conf_short)
+
+        df.at[df.index[i], "hybrid_confidence_long"] = conf_long
+        df.at[df.index[i], "hybrid_confidence_short"] = conf_short
+        df.at[df.index[i], "hybrid_alert_long"] = conf_long >= HYBRID_CONFIDENCE_THRESHOLD
+        df.at[df.index[i], "hybrid_alert_short"] = conf_short >= HYBRID_CONFIDENCE_THRESHOLD
+        df.at[df.index[i], "hybrid_debug"] = " | ".join(debug_parts)
+
+    df["hybrid_alert_active"] = df["hybrid_alert_long"] | df["hybrid_alert_short"]
+    return df
+
+
 def _format_date(dt) -> str:
     """Convierte una fecha a formato DD-MM-AAAA."""
     if isinstance(dt, str):
