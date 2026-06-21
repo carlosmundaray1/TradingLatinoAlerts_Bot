@@ -35,6 +35,29 @@ jobs:
           pip install --upgrade pip
           pip install pandas numpy plotly hmmlearn yfinance requests
 
+      # Restaura el estado HMM de la ejecucion anterior para que el bot
+      # detecte CAMBIOS de senal (no reporta como "inicial" si la senal
+      # es la misma que la corrida previa). Sin esto se generaria spam.
+      - name: Restaurar estado HMM
+        uses: actions/cache@v4
+        id: state-cache
+        with:
+          path: .hmm_state_${{ matrix.asset }}.json
+          key: hmm-state-${{ matrix.asset }}-${{ github.run_id }}
+          restore-keys: |
+            hmm-state-${{ matrix.asset }}-
+
       - name: Run HMM bot for ${{ matrix.asset }}
-        run: python tradinglatino_hmm_clean_v2.py --asset ${{ matrix.asset }} --headless
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BROWSER: /bin/true
+        run: python tradinglatino_hmm_clean_v4_Cl47.py --asset ${{ matrix.asset }} --headless
         timeout-minutes: 15
+
+      - name: Guardar estado HMM para proxima ejecucion
+        if: always()
+        uses: actions/cache@v4
+        with:
+          path: .hmm_state_${{ matrix.asset }}.json
+          key: hmm-state-${{ matrix.asset }}-${{ github.run_id }}
