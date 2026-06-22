@@ -1535,16 +1535,14 @@ def _build_signal_alert_detailed(
     regime_desc: Optional[str] = None,
     confidence: Optional[float] = None,
     expiration: Optional[Dict[str, Any]] = None,
+    score_long: Optional[float] = None,
+    score_short: Optional[float] = None,
+    score_threshold: Optional[float] = None,
+    prev_sig: Optional[str] = None,
+    bars_since_start: int = 0,
 ) -> str:
-    """Construye una alerta enriquecida para Telegram (formato HTML).
-
-    direction: 'LONG' | 'SHORT'
-    alert_kind: 'inicial' | 'cambio'
-    Incluye precio entrada, fuerza, regimen HMM + confidence, niveles TP
-    y trail trigger (calculados desde TAKE_PROFIT_PCT/TRAILING_STOP_PCT
-    del tf), y expiracion en velas.
-    """
-    emoji = "\U0001f7e2" if direction == "LONG" else "\U0001f534"  # \ud83d\udfe2 / \ud83d\udd34
+    """Construye una alerta enriquecida para Telegram (formato HTML)."""
+    emoji = "\U0001f7e2" if direction == "LONG" else "\U0001f534"
     tf_label = tf.upper()
     tp_pct = TAKE_PROFIT_PCT.get(tf, 2.0)
     trail_pct = TRAILING_STOP_PCT.get(tf, 1.0)
@@ -1560,9 +1558,14 @@ def _build_signal_alert_detailed(
             f"{direction} ({alert_kind})")
     lines.append(head)
     lines.append(f"Precio: {_fmt_price(price)}    Fuerza: {strength:.0f}%")
+    if score_long is not None and score_short is not None:
+        thresh = score_threshold if score_threshold is not None else 60
+        lines.append(f"Score LONG: {score_long:.0f} | SHORT: {score_short:.0f}  (umbral: {thresh:.0f})")
     if regime_desc:
         conf_txt = f" (conf {confidence*100:.0f}%)" if confidence is not None else ""
         lines.append(f"Regimen: {regime_desc}{conf_txt}")
+    if prev_sig and alert_kind == "cambio" and bars_since_start > 0:
+        lines.append(f"Previo: {prev_sig} (hace {bars_since_start} velas)")
     sign = "+" if direction == "LONG" else "-"
     sign_trail = "-" if direction == "LONG" else "+"
     lines.append(
@@ -5865,10 +5868,16 @@ def main():
             pass
         expiration = data.signal_info.get("expiration") if data.signal_info else None
 
+        score_l = data.signal_info.get("signal_score_long", 0) if data.signal_info else None
+        score_s = data.signal_info.get("signal_score_short", 0) if data.signal_info else None
+        s_thresh = data.signal_info.get("score_threshold") if data.signal_info else None
+        bars_since = expiration.get("bars_since_start", 0) if expiration else 0
         msg = _build_signal_alert_detailed(
             asset=ASSET, tf=tf_key, direction=curr_sig, alert_kind=alert_kind,
             price=curr_price_val, strength=curr_strength,
             regime_desc=regime_desc, confidence=confidence, expiration=expiration,
+            score_long=score_l, score_short=score_s, score_threshold=s_thresh,
+            prev_sig=prev_sig, bars_since_start=bars_since,
         )
         alertas.append(msg)
         tfs_alerted.append(tf_key)
